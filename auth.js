@@ -1,13 +1,12 @@
-/* CarbonOps AI — sign-in and sign-up portal. Uses Supabase Auth when configured, with a local demo fallback. */
+/* CarbonOps AI — sign-in and sign-up portal.
+   There is no server behind this page, so accounts live in this browser only.
+   Passwords are never stored: each account keeps a random salt and a PBKDF2-SHA-256 hash. */
 (function (G) {
   'use strict';
   const A = G.CarbonOps; const esc = G.CO_CHARTS.esc;
   const ACC_KEY = 'carbonops-accounts';
   const SES_KEY = 'carbonops-session';
   const AU = { tab: 'home', err: '', info: '', busy: false, show: false, strength: 0 };
-  let ACTIVE = null;
-  const cloudReady = () => !!(G.CarbonOpsCloud && G.CarbonOpsCloud.ready);
-  const cloudUser = (u) => ({ id: u.id, email: u.email || '', name: (u.user_metadata && u.user_metadata.full_name) || (u.email || 'User').split('@')[0], org: (u.user_metadata && u.user_metadata.organization) || '', role: (u.user_metadata && u.user_metadata.role) || 'Plant admin' });
 
   // ---------- storage ----------
   function accounts() { try { return JSON.parse(localStorage.getItem(ACC_KEY) || '[]'); } catch (e) { return []; } }
@@ -116,7 +115,7 @@
   A.ACT['lph-go'] = (i) => { const sc = document.getElementById('lph-scroll'); if (sc) sc.scrollTo({ top: Number(i) * sc.clientHeight, behavior: 'smooth' }); };
 
   function portal() {
-    const t = AU.tab; const accs = cloudReady() ? [] : accounts();
+    const t = AU.tab; const accs = accounts();
     if (t === 'home' || t === 'support') { const L3h = A.login3d, ok = !!(L3h && L3h.supported()); AU.drawn = true; return t === 'home' ? homePage(ok) : supportPage(ok); }
     const errOn = (k) => AU.err && new RegExp(k, 'i').test(AU.err);
     const field = (id, label, type, extra, after, inval) => '<div class="lp-field"><label for="' + id + '">' + label + '</label><div class="lp-input' + (inval ? ' bad' : '') + '"><input type="' + type + '" id="' + id + '" ' + (extra || '') + (inval ? ' aria-invalid="true" aria-describedby="lp-err"' : '') + '/>' + (after || '') + '</div></div>';
@@ -141,21 +140,17 @@
         '<div class="lp-meter" aria-hidden="true"><i class="s' + AU.strength + '"></i></div><p class="lp-hint" id="au-hint">' + ['At least 8 characters', 'Weak: add length, numbers or symbols', 'Fair: add a number or symbol', 'Good', 'Strong'][AU.strength] + '</p>' +
         field('au-pw2', 'Confirm password', pwType, 'autocomplete="new-password" required placeholder="Repeat the password"', '', errOn('match')) +
         '<div class="lp-field"><label for="au-role">Your role</label><div class="lp-input"><select id="au-role"><option>Plant admin</option><option>Sustainability officer</option><option>Viewer</option></select></div></div>' +
-        '<label class="lp-check"><input type="checkbox" id="au-agree"/> ' + (cloudReady() ? 'I agree to create an account and store my workspace data with CarbonOps cloud services.' : 'I understand this account is kept in this browser only.') + '</label>' +
+        '<label class="lp-check"><input type="checkbox" id="au-agree"/> I understand this account is kept in this browser only.</label>' +
         busyBtn('Create account', 'Creating account…') +
         '<p class="lp-switch">Already have an account? <button type="button" class="lp-link" data-act="au-tab" data-arg="signin">Sign in</button></p></form>';
     } else if (t === 'forgot') {
-      form = cloudReady()
-        ? '<div class="lp-form"><h2>Reset your password</h2><p class="lp-sub">We’ll send a secure reset link to your account email.</p>' + msg + field('au-reset-email', 'Account email', 'email', 'autocomplete="email" required placeholder="you@company.com"') + '<button type="button" class="lp-btn p" data-act="au-reset">Send reset link</button><p class="lp-switch"><button type="button" class="lp-link" data-act="au-tab" data-arg="signin">← Back to sign in</button></p></div>'
-        : '<div class="lp-form"><h2>Reset your password</h2><p class="lp-sub">There is no email server behind this offline page, so a reset link cannot be sent.</p>' +
-          '<div class="lp-msg info">' + ic('info') + '<span>Accounts live only in this browser. If you forgot a password, remove the account and create it again. Its workspace data is removed too.</span></div>' +
-          (accs.length ? '<div class="lp-accts">' + accs.map((x) => '<div class="lp-acct"><span class="lp-av">' + esc(initials(x.name)) + '</span><span><b>' + esc(x.name) + '</b><small>' + esc(x.email) + '</small></span><button type="button" class="lp-btn ghost sm" data-act="au-remove" data-arg="' + x.id + '">Remove</button></div>').join('') + '</div>' : '<p class="lp-sub">No accounts in this browser yet.</p>') +
-          '<p class="lp-switch"><button type="button" class="lp-link" data-act="au-tab" data-arg="signin">← Back to sign in</button></p></div>';
-    } else if (t === 'recover') {
-      form = '<form class="lp-form" data-form="recover" novalidate><h2>Choose a new password</h2><p class="lp-sub">Your account password is managed securely by Supabase.</p>' + msg + field('au-newpw', 'New password', AU.show ? 'text' : 'password', 'autocomplete="new-password" required minlength="8"') + field('au-newpw2', 'Confirm password', AU.show ? 'text' : 'password', 'autocomplete="new-password" required minlength="8"') + '<button class="lp-btn p" type="submit"' + (AU.busy ? ' disabled' : '') + '>Update password</button></form>';
+      form = '<div class="lp-form"><h2>Reset your password</h2><p class="lp-sub">There is no email server behind this page, so a reset link cannot be sent.</p>' +
+        '<div class="lp-msg info">' + ic('info') + '<span>Accounts live only in this browser. If you forgot a password, remove the account and create it again. Its workspace data is removed too.</span></div>' +
+        (accs.length ? '<div class="lp-accts">' + accs.map((x) => '<div class="lp-acct"><span class="lp-av">' + esc(initials(x.name)) + '</span><span><b>' + esc(x.name) + '</b><small>' + esc(x.email) + '</small></span><button type="button" class="lp-btn ghost sm" data-act="au-remove" data-arg="' + x.id + '">Remove</button></div>').join('') + '</div>' : '<p class="lp-sub">No accounts in this browser yet.</p>') +
+        '<p class="lp-switch"><button type="button" class="lp-link" data-act="au-tab" data-arg="signin">← Back to sign in</button></p></div>';
     } else {
       const docs = {
-        privacy: ['Privacy', cloudReady() ? 'Your account is managed by Supabase Auth and your workspace is stored in the CarbonOps Supabase project. AI questions, workspace summaries, bill or meter images, and floor plans you submit for reading are sent through the hosted AI provider selected by the site operator. Do not submit confidential information. The operator should publish a complete privacy notice and contact details before inviting production users.' : 'Your account and workspace data are stored in this browser on this device. Passwords are never stored as text. AI features require the hosted version.'],
+        privacy: ['Privacy', 'Your account and workspace data are stored in this browser on this device; this build does not sync them to a database. Passwords are never stored: only a salted PBKDF2-SHA-256 hash. When you use the hosted Gemini AI, the question or image you submit passes through CarbonOps hosting and is sent to Google Gemini for a response. If you connect your own AI key, requests go to that provider instead. Review provider terms before sending business documents or images.'],
         terms: ['Terms', 'CarbonOps AI is a demonstration build for evaluation and hackathon use. Emission figures depend on the data you enter and on the emission factors shown with each record. Results are estimates for internal decisions; they are not verified or assured, and they are not a compliance statement.'],
         help: ['Help', 'New here? Create an account, name your factory, upload a floor plan, and add data with Add data, bills, a spreadsheet, or the sample data button. To look around first, choose Explore the demo workspace. Forgot a password? Use Forgot password? on the sign-in form.']
       };
@@ -180,7 +175,7 @@
         '<main class="lp3-center"><div class="lp-card">' + corners + form + '</div></main>' +
         '<p class="lp-hint3d">' + ic('move-3d') + '<span>Drag to spin · click a glowing site</span></p>' +
         '<div class="lp-hud" aria-live="off"><div class="lp-hud-row"><b><span id="lp-hud-n">' + n3 + '</span><small> / ' + tot + '</small></b><span>sites on track</span></div><div class="lp-hud-track"><i id="lp-hud-bar" style="width:' + (n3 / (tot || 1) * 100) + '%"></i></div><span class="lp-hud-sim">Simulated sites</span></div>' +
-        '<footer class="lp-foot lp3-foot"><span>' + ic('lock') + (cloudReady() ? ' Secure sign-in and private workspace storage' : ' Accounts stay in this browser') + '</span><span aria-hidden="true">·</span><button type="button" data-act="au-tab" data-arg="privacy">Privacy</button><span aria-hidden="true">·</span><button type="button" data-act="au-tab" data-arg="terms">Terms</button><span aria-hidden="true">·</span><button type="button" data-act="au-tab" data-arg="support">Help</button></footer></div>';
+        '<footer class="lp-foot lp3-foot"><span>' + ic('lock') + ' Accounts stay in this browser</span><span aria-hidden="true">·</span><button type="button" data-act="au-tab" data-arg="privacy">Privacy</button><span aria-hidden="true">·</span><button type="button" data-act="au-tab" data-arg="terms">Terms</button><span aria-hidden="true">·</span><button type="button" data-act="au-tab" data-arg="support">Help</button></footer></div>';
     }
     return '<div class="lp' + (first ? ' first' : '') + (is3d ? ' is3d' : '') + '">' +
       '<section class="lp-brand" aria-label="About CarbonOps AI"><div class="lp-brand-in">' +
@@ -190,7 +185,7 @@
       '<ul class="lp-feats">' + feat('factory', 'Facility-level emissions tracking', 'Understand carbon emissions across facilities, departments, and operational processes.') + feat('sparkles', 'AI-powered reduction insights', 'Identify opportunities to reduce emissions, energy consumption, and operational waste.') + feat('git-compare-arrows', 'Scenario-based planning', 'Compare potential reduction strategies and understand their estimated environmental impact.') + '</ul></div>' +
       '<div class="lp-visual">' + stage + '</div></section>' +
       '<main class="lp-auth"><div class="lp-mlogo"><span class="lp-mark">' + LOGO + '</span><b>CarbonOps AI</b></div><div class="lp-card">' + corners + form + '</div>' + recent +
-      '<p class="lp-note">' + ic('lock') + (cloudReady() ? 'Secure sign-in and cloud workspace storage.' : 'Accounts are kept in this browser only. Passwords are salted and hashed, never stored as text.') + '</p>' +
+      '<p class="lp-note">' + ic('lock') + ' Accounts are kept in this browser only. Passwords are salted and hashed, never stored as text.</p>' +
       '<footer class="lp-foot"><button type="button" data-act="au-tab" data-arg="home">Home</button><span aria-hidden="true">·</span><button type="button" data-act="au-tab" data-arg="privacy">Privacy Policy</button><span aria-hidden="true">·</span><button type="button" data-act="au-tab" data-arg="terms">Terms of Service</button><span aria-hidden="true">·</span><button type="button" data-act="au-tab" data-arg="help">Help</button></footer></main></div>';
   }
   const initials = (n) => (n || 'U').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
@@ -208,14 +203,12 @@
     AU.keepFocus = true; show(); AU.keepFocus = false;
     if (keep !== false) Object.entries(vals).forEach(([id, v]) => { const i = document.getElementById(id); if (!i) return; if (i.type === 'checkbox') i.checked = v; else i.value = v; });
   }
-  async function enter(acc) {
-    ACTIVE = acc;
+  function enter(acc) {
     const go = () => {
       document.getElementById('auth-root').hidden = true; document.getElementById('auth-root').innerHTML = '';
       document.getElementById('app').hidden = false;
-      Promise.resolve(A.startSession(acc)).then(() => {
+      A.startSession(acc);
       if (A.appEnter) A.appEnter();
-      }).catch((e) => { ACTIVE = null; AU.err = e.message || 'Could not open your workspace.'; show(); });
     };
     if (A.login3d && A.login3d.on) { document.getElementById('auth-root').style.pointerEvents = 'none'; A.login3d.warp(() => { document.getElementById('auth-root').style.pointerEvents = ''; go(); }); }
     else go();
@@ -227,12 +220,6 @@
     AU.err = ''; AU.info = '';
     if (!EMAIL_RE.test(email)) { AU.err = 'Enter your work email, like name@company.com.'; return rerender(); }
     if (!pw) { AU.err = 'Enter your password.'; return rerender(); }
-    if (cloudReady()) {
-      AU.busy = true; rerender();
-      try { const { data, error } = await G.CarbonOpsCloud.client.auth.signInWithPassword({ email, password: pw }); if (error) throw error; AU.busy = false; await enter(cloudUser(data.user)); }
-      catch (e) { AU.busy = false; AU.err = e.message || 'Sign-in failed. Try again.'; rerender(); }
-      return;
-    }
     const acc = accounts().find((a) => a.email === email);
     AU.busy = true; rerender();
     try {
@@ -251,17 +238,6 @@
     else if (pw.length < 8) AU.err = 'Use a password of at least 8 characters.';
     else if (pw !== pw2) AU.err = 'The two passwords do not match.';
     else if (!document.getElementById('au-agree').checked) AU.err = 'Tick the box to confirm you understand where the account is stored.';
-    if (cloudReady()) {
-      if (AU.err) return rerender();
-      AU.busy = true; rerender();
-      try {
-        const { data, error } = await G.CarbonOpsCloud.client.auth.signUp({ email, password: pw, options: { data: { full_name: name, organization: val('au-org').trim(), role: val('au-role') || 'Plant admin' } } });
-        if (error) throw error;
-        if (data.session && data.user) await enter(cloudUser(data.user));
-        else { AU.busy = false; AU.tab = 'signin'; AU.info = 'Check your email to confirm your account, then sign in.'; rerender(false); }
-      } catch (e) { AU.busy = false; AU.err = e.message || 'Could not create the account.'; rerender(); }
-      return;
-    }
     else if (accounts().some((a) => a.email === email)) AU.err = 'An account with this email already exists in this browser. Sign in instead.';
     if (AU.err) return rerender();
     AU.busy = true; rerender();
@@ -275,25 +251,10 @@
   }
 
   // ---------- events ----------
-  document.addEventListener('submit', (e) => { const f = e.target.closest('form[data-form]'); if (!f) return; e.preventDefault(); if (f.dataset.form === 'signin') signIn(); else if (f.dataset.form === 'signup') signUp(); else if (f.dataset.form === 'recover') A.ACT['au-recover'](); });
+  document.addEventListener('submit', (e) => { const f = e.target.closest('form[data-form]'); if (!f) return; e.preventDefault(); if (f.dataset.form === 'signin') signIn(); else if (f.dataset.form === 'signup') signUp(); });
   A.ACT['au-tab'] = (t) => { if (t !== AU.tab) AU.prev = AU.tab; AU.tab = t; AU.err = ''; AU.info = ''; AU.strength = 0; rerender(false); };
   A.ACT['au-eye'] = () => { AU.show = !AU.show; rerender(); };
   A.ACT['au-forgot'] = () => { AU.tab = 'forgot'; AU.err = ''; rerender(false); };
-  A.ACT['au-reset'] = async () => {
-    const email = val('au-reset-email').trim().toLowerCase();
-    if (!EMAIL_RE.test(email)) { AU.info = 'Enter a valid account email.'; return rerender(false); }
-    const { error } = await G.CarbonOpsCloud.client.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
-    AU.info = error ? error.message : 'If an account exists for that address, a reset link has been sent.'; rerender(false);
-  };
-  A.ACT['au-recover'] = async () => {
-    const next = val('au-newpw'), repeat = val('au-newpw2');
-    if (next.length < 8) { AU.err = 'Use a password of at least 8 characters.'; return rerender(false); }
-    if (next !== repeat) { AU.err = 'The passwords do not match.'; return rerender(false); }
-    const { error } = await G.CarbonOpsCloud.client.auth.updateUser({ password: next });
-    if (error) { AU.err = error.message; return rerender(false); }
-    history.replaceState(null, '', location.pathname + location.search);
-    if (ACTIVE) await enter(ACTIVE); else { AU.tab = 'signin'; AU.info = 'Password updated. Please sign in.'; rerender(false); }
-  };
   A.ACT['au-pick'] = (email) => { const e = document.getElementById('au-email'); if (e) e.value = email; const p = document.getElementById('au-pw'); if (p) p.focus(); };
   A.ACT['au-demo'] = () => { setSession('demo', false); enter({ id: 'demo', name: 'Demo user', email: 'demo@carbonops.example', role: 'Plant admin', demo: true }); };
   A.ACT['au-remove'] = (id) => {
@@ -306,15 +267,6 @@
 
   // ---------- account management (used by Settings) ----------
   async function changePassword(cur, next, next2) {
-    if (cloudReady()) {
-      if (!ACTIVE) return 'Please sign in again.';
-      if (next.length < 8) return 'Use a new password of at least 8 characters.';
-      if (next !== next2) return 'The new passwords do not match.';
-      const { error: reauthError } = await G.CarbonOpsCloud.client.auth.signInWithPassword({ email: ACTIVE.email, password: cur });
-      if (reauthError) return 'Your current password is not correct.';
-      const { error } = await G.CarbonOpsCloud.client.auth.updateUser({ password: next });
-      return error ? error.message : '';
-    }
     const s = session(); if (!s || s.id === 'demo') return 'The demo account has no password. Create your own account to set one.';
     const list = accounts(); const me = list.find((a) => a.id === s.id); if (!me) return 'Account not found.';
     if (next.length < 8) return 'Use a new password of at least 8 characters.';
@@ -322,54 +274,22 @@
     if (await hashPw(cur, me.salt) !== me.hash) return 'Your current password is not correct.';
     me.salt = newSalt(); me.hash = await hashPw(next, me.salt); saveAccounts(list); return '';
   }
-  async function updateProfile(p) {
-    if (cloudReady() && ACTIVE) {
-      if (p.email && p.email !== ACTIVE.email) return 'Email changes require a verified confirmation flow and are not available here yet.';
-      ACTIVE = { ...ACTIVE, name: p.name || ACTIVE.name, role: p.role || ACTIVE.role };
-      const { error } = await G.CarbonOpsCloud.client.auth.updateUser({ data: { full_name: ACTIVE.name, role: ACTIVE.role } });
-      return error ? error.message : '';
-    }
+  function updateProfile(p) {
     const s = session(); if (!s || s.id === 'demo') return '';
     const list = accounts(); const me = list.find((a) => a.id === s.id); if (!me) return '';
     if (p.email && p.email !== me.email && list.some((a) => a.email === p.email)) return 'Another account here already uses that email.';
     Object.assign(me, { name: p.name, email: p.email || me.email, role: p.role }); saveAccounts(list); return '';
   }
-  async function signOut() {
-    if (cloudReady()) {
-      if (ACTIVE && !ACTIVE.demo && A.S) await G.CarbonOpsCloud.saveWorkspace(ACTIVE.id, A.S).catch((e) => console.error('CarbonOps cloud save failed:', e.message));
-      await G.CarbonOpsCloud.client.auth.signOut();
-    }
-    ACTIVE = null; clearSession(); A.endSession(); AU.tab = 'signin'; AU.err = ''; AU.info = 'You have signed out.'; show();
-  }
-  async function deleteAccount() {
-    if (cloudReady() && ACTIVE) {
-      try {
-        const deletedId = ACTIVE.id;
-        const { data } = await G.CarbonOpsCloud.client.auth.getSession();
-        if (!data.session) throw new Error('Please sign in again.');
-        const response = await fetch('/api/account', { method: 'DELETE', headers: { Authorization: 'Bearer ' + data.session.access_token } });
-        if (!response.ok) throw new Error('Account deletion service is not available right now.');
-        await G.CarbonOpsCloud.client.auth.signOut(); ACTIVE = null; A.endSession();
-        try { localStorage.removeItem(A.KEY + ':' + deletedId); } catch (_) { /* ignore */ }
-        AU.tab = 'signin'; AU.info = 'Your account and workspace were deleted.'; show();
-      } catch (e) { A.toast(e.message); }
-      return;
-    }
+  function signOut() { clearSession(); A.endSession(); AU.tab = 'signin'; AU.err = ''; AU.info = 'You have signed out.'; show(); }
+  function deleteAccount() {
     const s = session(); if (!s) return;
     if (s.id !== 'demo') saveAccounts(accounts().filter((a) => a.id !== s.id));
     try { localStorage.removeItem(A.KEY + ':' + s.id); } catch (e) { /* ignore */ }
     clearSession(); A.endSession(); AU.tab = 'signin'; AU.info = 'Account and its workspace were removed from this browser.'; show();
   }
-  function current() { if (cloudReady()) return ACTIVE; const s = session(); if (!s) return null; if (s.id === 'demo') return { id: 'demo', demo: true }; return accounts().find((a) => a.id === s.id) || null; }
+  function current() { const s = session(); if (!s) return null; if (s.id === 'demo') return { id: 'demo', demo: true }; return accounts().find((a) => a.id === s.id) || null; }
 
-  async function start() {
-    if (cloudReady()) {
-      const { data, error } = await G.CarbonOpsCloud.client.auth.getSession();
-      if (error) { AU.info = 'Could not connect to account services. Try refreshing.'; show(); return; }
-      if (location.hash.includes('type=recovery') && data.session) { ACTIVE = cloudUser(data.session.user); AU.tab = 'recover'; show(); return; }
-      if (data.session) { await enter(cloudUser(data.session.user)); return; }
-      show(); return;
-    }
+  function start() {
     const s = session();
     if (s) {
       if (s.id === 'demo') return enter({ id: 'demo', name: 'Demo user', email: 'demo@carbonops.example', role: 'Plant admin', demo: true });

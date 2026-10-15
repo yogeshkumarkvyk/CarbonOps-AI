@@ -4,7 +4,6 @@
   const D = G.CO_DATA, E = G.CO_ENGINE, C = G.CO_CHARTS, esc = C.esc;
   const A = G.CarbonOps;
   const { VIEWS, LIVE, ACT, CH, IN, CHART_CLICK, UI, CAP, n, tco2, inr, pct, ic, chip, qchip, ST, area, catLabel, catColor, ph, offerFile, toast, render, refreshLive, renderOverlay, save, audit, go } = A;
-  const aiName = () => G.CarbonOpsCloud && G.CarbonOpsCloud.ready ? 'AI model' : 'Claude';
   const S = () => A.S; const F = () => A.F();
   const canEdit = () => S().settings.user.role !== 'Viewer';
   const denied = () => toast('Your role (Viewer) cannot change data. Switch role in Settings.');
@@ -217,7 +216,7 @@
     const cv = UI.cv;
     const avail = CAP.sample && CAP.images;
     const status = !CAP.checked ? '<div class="note"><span class="spinner"></span> Checking whether the vision model is available in this view…</div>'
-      : avail ? '<div class="note ok"><b>AI-assisted reading is enabled.</b> Meter photos are sent through CarbonOps AI to its configured hosted provider.</div>'
+      : avail ? '<div class="note ok"><b>Vision model available.</b> Meter photos are read by AI.'+(CAP.ai?' ('+CAP.ai.name+')':'')+'</div>'
         : '<div class="note calm">' + ic('info') + '<span><b>Automatic reading works in the online version.</b> Here, type the reading from the photo below. It goes through the same checks.</span></div>';
     const meters = D.METERS;
     const f = cv.form || cvDefault();
@@ -278,7 +277,7 @@
       save();
     } catch (e) {
       const code = e && e.code;
-      cv.error = code === 'cancelled' ? 'Reading stopped.' : code === 'not_granted' ? 'Permission to use Claude was declined, so the photo was not read. Enter the value by hand.' : code === 'rate_limited' ? 'Too many requests right now. Try again in a minute.' : code === 'image_rejected' ? 'The image was rejected (type or size). Try a different photo.' : code === 'invalid_json' ? 'The model reply could not be parsed. Try again or enter the value by hand.' : code === 'images_unavailable' ? 'Image reading is not available in this view. Enter the value by hand.' : 'The vision service did not respond (' + (code || 'error') + '). Enter the value by hand.';
+      cv.error = code === 'cancelled' ? 'Reading stopped.' : code === 'not_granted' ? 'Permission to use AI was declined, so the photo was not read. Enter the value by hand.' : code === 'rate_limited' ? 'Too many requests right now. Try again in a minute.' : code === 'image_rejected' ? 'The image was rejected (type or size). Try a different photo.' : code === 'invalid_json' ? 'The model reply could not be parsed. Try again or enter the value by hand.' : code === 'images_unavailable' ? 'Image reading is not available in this view. Enter the value by hand.' : 'The vision service did not respond (' + (code || 'error') + '). Enter the value by hand.';
       if (code === 'not_granted' || code === 'images_unavailable') CAP.images = false;
     }
     cv.busy = false; cv.ctl = null; render();
@@ -674,18 +673,35 @@
       data_gaps: E.detectGaps(vm.f.records, vm.months).map((g) => g.stream + ' ' + g.month),
       estimated_records_in_period: vm.f.records.filter((r) => vm.period.months.includes(r.month) && r.status === 'estimated').map((r) => area(r.area).name + ' ' + catLabel(r.category) + ' ' + r.month),
       emission_factors: Object.keys(S().reg).map((k) => { const f = E.factor(S().reg, k); return { name: f.name, value: f.value, unit: f.unit, quality: f.quality, source: f.source }; }),
-      tariff_assumptions_inr: S().settings.tariffs
+      tariff_assumptions_inr: S().settings.tariffs,
+      monthly_totals_t_co2e: (() => { const h = E.aggregate(vm.f.records, vm.months, S().settings); return vm.months.slice(-24).map((m) => { const x = h.byMonth[m] || {}; return { month: m, total: r1(x.total || 0), scope1: r1(x.s1 || 0), scope2: r1(x.s2 || 0), scope3: r1(x.s3 || 0), electricity_MWh: Math.round((x.elec || 0) / 1000), production_parts: Math.round(x.prod || 0) }; }); })(),
+      areas: D.AREAS.map((x) => ({ id: x.id, name: x.name, kind: x.kind, equipment: x.equipment, operating_hours_per_day: x.hours || null })),
+      floor_plan: (() => { const bp = vm.f.blueprint; if (!bp || !bp.zones || !bp.zones.length) return 'no floor plan uploaded'; return { name: bp.name, rooms: bp.zones.slice(0, 60).map((z) => ({ label: z.label || null, kind: z.kind || null, linked_area: z.area ? area(z.area).name : null, equipment: z.equip || [] })) }; })(),
+      record_counts: (() => { const c = {}; vm.f.records.filter((r) => vm.period.months.includes(r.month)).forEach((r) => { c[r.status] = (c[r.status] || 0) + 1; }); return c; })(),
+      workspace: vm.f.blank ? 'user\'s own workspace (data they entered)' : 'demo workspace with fictional sample data'
     };
   }
-  const RULES = 'You are CarbonOps AI Advisor, helping managers of a manufacturing plant understand greenhouse gas emissions and prioritise reductions.\n' +
-    'You receive a JSON snapshot produced by the platform\'s calculation engine. Rules:\n' +
-    '- Use only numbers that appear in the snapshot. Never invent emission factors, savings, costs or payback periods. If something is not in the snapshot, say it is not available and what data would be needed.\n' +
-    '- Name the record, source or recommendation id your figures come from (for example "top_sources: Production Line A grid electricity" or "recommendation air-leaks").\n' +
-    '- Distinguish measured, imported, estimated and simulated values. Scenario and planner figures are estimates or simulations, not verified results. Only call a reduction verified if its status is Verified.\n' +
-    '- Mention uncertainty: illustrative factors (steel, freight, waste) and assumption-based savings fractions.\n' +
-    '- Do not claim regulatory compliance or certification. CO2e is not a measure of local air or water pollutants.\n' +
-    '- The sample factory (Deccan Precision Components) is fictional demo data; do not present it as a real company. A user\'s own workspace holds the data they entered, with rooms from their floor plan.\n' +
-    '- Write plainly for a plant manager: short paragraphs or bullet points, under 250 words unless asked for more. End with one or two practical next steps.';
+  const VIEW_IDS = ['overview', 'twin', 'explorer', 'planner', 'simulator', 'data', 'reports', 'method', 'settings'];
+  const RULES = 'You are CarbonOps AI Advisor, an expert assistant inside CarbonOps AI, a carbon-intelligence platform for manufacturing plants (mostly in India). You know industrial energy efficiency, the GHG Protocol (Scopes 1, 2, 3), emission factors, Indian context (CEA grid emission factor, BEE PAT scheme, Carbon Credit Trading Scheme, SEBI BRSR), and practical decarbonisation (VFDs, compressed-air leaks, heat recovery, solar PPAs, fuel switching, electrification, recycled materials).\n' +
+    'You receive a JSON DATA SNAPSHOT of the user\'s factory, calculated by the platform\'s engine. You are a helpful, conversational assistant. How to handle questions:\n' +
+    '1. Questions about THIS factory, its data, rooms, emissions, costs or the CarbonOps app: answer from the snapshot. You may calculate (sums, differences, percentages, per-part figures, annualising) and say what you calculated from. Never invent factory measurements, costs or savings that are not in the snapshot or derivable from it; if data is missing, say exactly what data would be needed and where to add it in the app (Add data, Data Centre, bills upload, floor plan).\n' +
+    '2. General questions: answer them properly and in full from your own knowledge. This includes climate and sustainability, energy, engineering, manufacturing, operations, business, finance and economics basics, regulations, technology, science, maths, definitions, how-things-work, everyday general knowledge, and help writing things (an email to management, a report summary, a pitch). Label typical industry figures as general estimates, not this factory\'s data. Where it fits naturally, connect the answer to this factory in one line.\n' +
+    '3. Questions you cannot answer: live or very recent information you cannot know (today\'s news, live prices, weather, sports scores), private data about people, or anything harmful or inappropriate. For these, reply politely in one or two sentences: "I\'m the CarbonOps AI Advisor, built for your factory\'s energy, emissions and general work questions, so I can\'t help with that one." and suggest a related question you can answer.\n' +
+    'Greetings and small talk: reply warmly in one line and offer two things you can help with.\n' +
+    'Honesty rules: distinguish measured, imported, estimated and simulated values; planner and simulator numbers are estimates, only status Verified is verified. Do not claim regulatory compliance or certification. CO2e is not a measure of local air pollution. The demo factory (Deccan Precision Components) is fictional.\n' +
+    'Style: talk like a sharp, friendly energy consultant to a plant manager. Use markdown: short paragraphs, bullet points, **bold** key numbers, and a small table when comparing several items. Keep it under 220 words unless the user asks for detail. Do not repeat the question.\n' +
+    'Interactive extras (use when relevant, max 3 per answer, each on its own line at the end): [[area:AREA_ID|Open <name> in 3D]] to open a room in the digital twin, using an id from "areas"; [[go:VIEW|Label]] to open a page, VIEW one of ' + VIEW_IDS.join(', ') + '; [[rec:RECOMMENDATION_ID|Label]] to open a recommendation in the planner.\n' +
+    'Always finish with one final line exactly like: FOLLOWUPS: first short follow-up question | second | third';
+  // pull action buttons and follow-up questions out of an AI answer
+  function parseAnswer(text) {
+    let t = String(text || ''); const acts = []; let follow = [];
+    const fm = t.match(/\n?\s*FOLLOWUPS?:\s*([^\n]*)\s*$/i);
+    if (fm) { follow = fm[1].split('|').map((x) => x.trim().replace(/^[-*\d.)\s]+/, '')).filter((x) => x.length > 3).slice(0, 3); t = t.slice(0, fm.index); }
+    t = t.replace(/\n?\s*FOLLOWUPS?:[^\n]*$/i, '');
+    t = t.replace(/\[\[(area|go|rec):([a-zA-Z0-9_-]+)\|([^\]]{1,60})\]\]/g, (m, k, id, label) => { if (acts.length < 3 && !acts.some((x) => x.k === k && x.id === id)) acts.push({ k, id, label }); return ''; });
+    t = t.replace(/\[\[[^\]]*$/, ''); // half-written tag while streaming
+    return { text: t.replace(/\n{3,}/g, '\n\n').trim(), acts, follow };
+  }
   function ruleAnswer(q, vm) {
     const s = q.toLowerCase(); const a = vm.agg; const b = vm.aggCmp; const recs = vm.recs.filter((r) => r.status !== 'Rejected');
     const t = (kg) => n(kg / 1000, 1) + ' t';
@@ -727,22 +743,27 @@
     if (/steel|material|recycl|trade/.test(s)) {
       return 'Recycled-route (EAF) steel can have a much lower footprint than blast-furnace steel, but this platform has no supplier factor for it yet, so the simulator will not apply a reduction until you enter one from a supplier EPD.\n\nTrade-offs to check: grade and cleanliness requirements for machined parts, residual elements (copper, tin) affecting machinability, price premium or discount, and supply continuity. Steel is ' + t(a.byCat.steel || 0) + ' in this period with an illustrative factor.' + tail;
     }
-    return 'In rule-based mode I can answer these questions: ' + QUESTIONS.join(' / ') + tail;
+    return 'I\'m the CarbonOps AI Advisor. Without an AI connection I can only answer set questions about this factory, such as: ' + QUESTIONS.slice(0, 6).join(' / ') + '.\n\nConnect AI (Settings → AI connection) and I can answer general questions too.' + tail;
   }
   function md(text) {
     const lines = esc(text).split('\n'); let html = ''; let list = null;
     const inline = (s) => s.replace(/\*\*(.+?)\*\*/g, '<b>$1</b>').replace(/_(.+?)_/g, '<i>$1</i>').replace(/`(.+?)`/g, '<code>$1</code>');
     const close = () => { if (list) { html += '</' + list + '>'; list = null; } };
+    let tbl = null;
+    const flush = () => { if (!tbl) return; const rows = tbl.filter((r) => !/^\s*\|?\s*:?-{2,}/.test(r)).map((r) => r.replace(/^\s*\||\|\s*$/g, '').split('|').map((c) => inline(c.trim()))); html += '<div class="ai-tbl"><table>' + rows.map((r, i) => '<tr>' + r.map((c) => i ? '<td>' + c + '</td>' : '<th>' + c + '</th>').join('') + '</tr>').join('') + '</table></div>'; tbl = null; };
     lines.forEach((l) => {
       let m;
+      if (/^\s*\|.*\|\s*$/.test(l)) { close(); (tbl = tbl || []).push(l); return; }
+      flush();
       if ((m = l.match(/^\s*[-*•]\s+(.*)/))) { if (list !== 'ul') { close(); html += '<ul>'; list = 'ul'; } html += '<li>' + inline(m[1]) + '</li>'; }
       else if ((m = l.match(/^\s*\d+[.)]\s+(.*)/))) { if (list !== 'ol') { close(); html += '<ol>'; list = 'ol'; } html += '<li>' + inline(m[1]) + '</li>'; }
       else if ((m = l.match(/^#{1,4}\s+(.*)/))) { close(); html += '<h4>' + inline(m[1]) + '</h4>'; }
       else if (l.trim() === '') close();
       else { close(); html += '<p>' + inline(l) + '</p>'; }
     });
-    close(); return html;
+    flush(); close(); return html;
   }
+  const GENERAL_Q = [['What is Scope 3?', 'Explain Scope 1, 2 and 3 in simple words, using our numbers as examples.'], ['Solar for us?', 'Would rooftop solar or a solar PPA make sense for our plant? What would it cut?'], ['Plan to hit target', 'Make a 12-month plan to hit our reduction target, month by month.'], ['BRSR / CCTS?', 'What do BRSR and India\'s Carbon Credit Trading Scheme mean for a plant like ours?']];
   const SHORT_Q = [['Biggest sources?', QUESTIONS[0]], ['Why did it go up?', QUESTIONS[1]], ['What to do first?', QUESTIONS[2]], ['Cheap wins?', QUESTIONS[3]], ['Best payback?', QUESTIONS[4]], ['What data is missing?', QUESTIONS[6]]];
   // Full-page welcome: a factory snapshot plus large starter questions.
   function welcomeHTML() {
@@ -760,7 +781,8 @@
     const cards = [['flame', 'Where am I wasting the most energy?', 'The biggest sources and why', 'Where am I wasting the most energy?'], ['trending-up', 'Why did emissions go up?', 'What changed against the comparison period', QUESTIONS[1]], ['list-checks', 'What should we fix first?', 'Three actions to investigate', QUESTIONS[2]], ['piggy-bank', 'Which fix pays back fastest?', 'Best payback in the planner', QUESTIONS[4]]];
     return '<div class="aiw"><div class="aiw-h"><div class="ai-orb" aria-hidden="true">' + ic('sparkles') + '</div><div><h2>Ask your factory anything</h2><p>Type a question or tap the mic. Answers use this factory\'s own calculated numbers.</p></div></div>' + snap +
       '<div class="aiw-qs">' + cards.map(([icn, t, d, q], i) => '<button type="button" class="aiw-q" style="--i:' + i + '" data-act="ad-ask" data-arg="' + esc(q) + '"><span class="aiw-ic">' + ic(icn) + '</span><b>' + t + '</b><small>' + d + '</small><span class="aiw-go">' + ic('arrow-up-right') + '</span></button>').join('') + '</div>' +
-      '<div class="ai-chips aiw-more">' + SHORT_Q.slice(3).map(([l, q]) => '<button type="button" data-act="ad-ask" data-arg="' + esc(q) + '">' + esc(l) + '</button>').join('') + '</div></div>';
+      '<div class="ai-chips aiw-more">' + SHORT_Q.slice(3).concat(CAP.sample ? GENERAL_Q : []).map(([l, q]) => '<button type="button" data-act="ad-ask" data-arg="' + esc(q) + '">' + esc(l) + '</button>').join('') + '</div>' +
+      (CAP.checked && !CAP.sample ? '<div class="note warn small aiw-connect"><span><b>The Advisor is in limited rule-based mode.</b> Connect an AI key and it answers any question about your factory, carbon rules and fixes, in plain language.</span><button type="button" class="btn sm primary" data-act="ai-connect">' + ic('sparkles') + 'Connect AI</button></div>' : '') + '</div>';
   }
   function chatHTML(where) {
     const ad = UI.advisor; const turns = ad.turns;
@@ -768,13 +790,29 @@
     if (!turns.length) {
       return '<div class="ai-empty"><div class="ai-orb" aria-hidden="true">' + ic('sparkles') + '</div><p>Ask anything about this factory\'s emissions. Answers use the platform\'s own numbers.</p><div class="ai-chips">' + SHORT_Q.map(([l, q]) => '<button type="button" data-act="ad-ask" data-arg="' + esc(q) + '">' + esc(l) + '</button>').join('') + '</div></div>';
     }
-    return turns.map((t, i) => t.role === 'user' ? '<div class="ai-msg u">' + esc(t.content) + '</div>' : '<div class="ai-msg a msg-' + i + '">' + (t.content ? md(t.content) : '<span class="ai-dots"><i></i><i></i><i></i></span>') + '<span class="src">' + esc(t.meta || '') + '</span></div>').join('');
+    return turns.map((t, i) => t.role === 'user' ? '<div class="ai-msg u">' + esc(t.content) + '</div>' : '<div class="ai-msg a msg-' + i + '">' + turnBody(t, i === turns.length - 1) + '</div>').join('');
   }
+  function turnBody(t, last) {
+    const p = parseAnswer(t.content);
+    const acts = p.acts.filter((x) => x.k === 'area' ? D.AREAS.some((a) => a.id === x.id) : x.k === 'go' ? VIEW_IDS.includes(x.id) : (A.VM && A.VM.recs.some((r) => r.id === x.id)));
+    return (p.text ? md(p.text) : '<span class="ai-dots"><i></i><i></i><i></i></span>') +
+      (acts.length && !t.streaming ? '<div class="ai-acts">' + acts.map((x) => '<button type="button" data-act="ad-do" data-arg="' + esc(x.k + ':' + x.id) + '">' + ic(x.k === 'area' ? 'box' : x.k === 'rec' ? 'lightbulb' : 'arrow-right') + esc(x.label) + '</button>').join('') + '</div>' : '') +
+      '<span class="src">' + esc(t.meta || '') + '</span>' +
+      (last && p.follow.length && !t.streaming && !UI.advisor.busy ? '<div class="ai-chips ai-follow">' + p.follow.map((q) => '<button type="button" data-act="ad-ask" data-arg="' + esc(q) + '">' + esc(q) + '</button>').join('') + '</div>' : '');
+  }
+  ACT['ad-do'] = (arg) => {
+    const i = String(arg).indexOf(':'); const k = arg.slice(0, i), id = arg.slice(i + 1);
+    UI.advisor.miniOpen = UI.view === 'advisor' ? UI.advisor.miniOpen : true;
+    if (k === 'area') { UI.twin.area = id; UI.twin.part = null; UI.twin.focus = id; if (A.planApplied && A.planApplied()) UI.twin.layout = 'plan3d'; else if (A.F().blueprint && A.F().blueprint.zones && A.F().blueprint.zones.length) UI.twin.layout = 'plan3d'; A.go('twin'); }
+    else if (k === 'go') A.go(id);
+    else if (k === 'rec' && A.CHART_CLICK.rec) A.CHART_CLICK.rec(id);
+  };
   function modeLine() {
     const ad = UI.advisor; const llm = !!CAP.sample && ad.mode !== 'rules';
-    if (!CAP.checked) return '<span class="ai-mode">Checking for ' + aiName() + '…</span>';
-    if (!CAP.sample) return '<span class="ai-mode">Rule-based answers · no AI model in this view</span>';
-    return '<span class="ai-mode">' + (llm ? 'Answered by ' + aiName() : 'Rule-based answers') + ' · <button type="button" data-act="ad-mode" data-arg="' + (llm ? 'rules' : 'llm') + '">switch to ' + (llm ? 'rule-based' : aiName()) + '</button></span>';
+    if (!CAP.checked) return '<span class="ai-mode">Checking for AI…</span>';
+    if (!CAP.sample) return '<span class="ai-mode">Rule-based answers (limited) · <button type="button" data-act="ai-connect">Connect AI for full answers</button></span>';
+    const nm = (CAP.ai && CAP.ai.name) || 'Claude';
+    return '<span class="ai-mode">' + (llm ? ic('sparkles') + ' Live AI · ' + esc(nm) : 'Rule-based answers') + ' · <button type="button" data-act="ad-mode" data-arg="' + (llm ? 'rules' : 'llm') + '">switch to ' + (llm ? 'rule-based' : esc(nm)) + '</button></span>';
   }
   function composer(id) {
     const ad = UI.advisor;
@@ -848,18 +886,26 @@
     ad.turns.push({ role: 'user', content: q });
     const useLLM = !!CAP.sample && ad.mode !== 'rules';
     if (!useLLM) { ad.turns.push({ role: 'assistant', content: ruleAnswer(q, vm), meta: 'Rule-based · ' + vm.period.label }); refreshChats(); return; }
-    const idx = ad.turns.length; ad.turns.push({ role: 'assistant', content: '', meta: aiName() + ' · from this factory\'s data, ' + vm.period.label });
+    const idx = ad.turns.length; ad.turns.push({ role: 'assistant', content: '', meta: ((CAP.ai && CAP.ai.name) || 'Claude') + ' · from this factory\'s data, ' + vm.period.label });
     ad.busy = true; ad.ctl = new AbortController(); refreshChats();
-    const history = ad.turns.slice(0, -1).slice(-8).map((t) => ({ role: t.role, content: t.content || '(no answer)' }));
-    const input = [{ role: 'user', content: RULES + '\n\nDATA SNAPSHOT:\n' + JSON.stringify(snapshot(vm)) }].concat(history);
+    const sys = RULES + '\n\nDATA SNAPSHOT (JSON, period ' + vm.period.label + '):\n' + JSON.stringify(snapshot(vm));
+    const history = ad.turns.slice(0, -1).slice(-12).map((t) => ({ role: t.role, content: t.role === 'assistant' ? (parseAnswer(t.content).text || '(no answer)') : t.content }));
+    const input = CAP.sample.system ? history : [{ role: 'user', content: sys }].concat(history);
+    const T = ad.turns[idx]; T.streaming = true;
+    let gotText = false; const ctlAd = ad.ctl; const wd = setTimeout(() => { if (!gotText && ctlAd) { T.timedOut = true; ctlAd.abort(); } }, 60000);
+    const paint = () => { document.querySelectorAll('.msg-' + idx).forEach((el) => { el.innerHTML = turnBody(T, true); }); A.icons(); scrollChat(); };
     try {
-      const res = await CAP.sample(input, { cache: false, signal: ad.ctl.signal, onText: ({ text }) => { ad.turns[idx].content = text; document.querySelectorAll('.msg-' + idx).forEach((el) => { el.innerHTML = md(text) + '<span class="src">' + esc(ad.turns[idx].meta) + '</span>'; }); scrollChat(); } });
-      ad.turns[idx].content = res.text; if (res.truncated) ad.turns[idx].meta += ' · cut short';
+      const res = await CAP.sample(input, { system: sys, cache: false, signal: ad.ctl.signal, maxTokens: 4096, onText: ({ text }) => { gotText = true; T.content = text; paint(); } });
+      T.content = res.text || T.content; if (res.truncated) T.meta += ' · cut short';
     } catch (e) {
-      const code = e && e.code; const fallback = code === 'not_granted' || code === 'sampling_disabled';
-      ad.turns[idx].content = (e && e.text ? e.text + '\n\n' : '') + (code === 'cancelled' ? '_Stopped._' : fallback ? ruleAnswer(q, vm) : '_The advisor could not answer (' + (code || 'error') + '). ' + (code === 'rate_limited' ? 'Too many requests; try again shortly.' : 'Try again, or switch to rule-based.') + '_');
-      if (fallback) { ad.turns[idx].meta = 'Rule-based (Claude permission not granted)'; CAP.sample = null; }
+      let code = e && e.code; if (code === 'cancelled' && T.timedOut) code = 'timeout';
+      const fallback = code === 'not_granted' || code === 'sampling_disabled';
+      const why = { bad_key: 'The AI key was rejected. Check it under Settings → AI connection.', timeout: 'The AI took too long to answer (Google is busy). Ask again in a moment.', overloaded: 'The AI is in high demand right now. Ask again in a moment.', rate_limited: 'The AI is busy right now (rate limit). Wait a few seconds and ask again.', network: 'The AI could not be reached. Check the internet connection.', not_configured: 'AI is not connected.' }[code] || ('The advisor could not answer (' + (code || 'error') + '). Try again, or switch to rule-based.');
+      const partial = parseAnswer((e && e.text) || T.content || '').text;
+      T.content = (partial ? partial + '\n\n' : '') + (code === 'cancelled' ? '_Stopped._' : fallback ? ruleAnswer(q, vm) : '_' + why + '_' + (code === 'bad_key' || code === 'network' || code === 'rate_limited' || code === 'overloaded' || code === 'timeout' ? '\n\nRule-based answer meanwhile:\n\n' + ruleAnswer(q, vm) : ''));
+      if (fallback) { T.meta = 'Rule-based (AI permission not granted)'; CAP.sample = null; }
     }
+    clearTimeout(wd); T.streaming = false;
     ad.busy = false; ad.ctl = null; refreshChats();
   }
 
@@ -956,7 +1002,7 @@
         '<div class="card-b"><h3 class="ht-h">How to use CarbonOps AI in six steps</h3><p class="small muted" style="margin:2px 0 12px">The video above shows each step, with a voice-over and captions. Turn your sound on.</p><ol class="ht-steps">' +
         step(1, 'Create an account', 'Every new account starts empty. Use “Explore the demo workspace” to look at a finished sample factory instead.') +
         step(2, 'Name your factory', 'On the Overview, type the factory name, location and what you make, then Save.') +
-        step(3, 'Upload your floor plan', 'The hosted AI model can read room names on the plan and build the 3D twin from them. You can also type a room name and drag a box around it.') +
+        step(3, 'Upload your floor plan', 'AI reads the rooms on the plan and builds the 3D twin from them. You can also type a room name and drag a box around it.') +
         step(4, 'Add your data', 'Use Add data at the top for one line at a time, Upload for bills, Excel or photos, or Add sample data to fill two months for every room.') +
         step(5, 'Read the Overview and the 3D twin', 'See the total, each room, and each source. Click a room to see its details.') +
         step(6, 'Find where to act', 'Reduction Planner shows what went up, what went down and where a cut counts most. Scenario Simulator lets you try cuts with sliders.') +
@@ -977,7 +1023,7 @@
           '<div class="tbl-wrap"><table><thead><tr><th>Factor</th><th>Value</th><th>Quality</th><th>Source</th><th>Version</th><th></th></tr></thead><tbody>' +
           Object.keys(reg).map((k) => { const f = E.factor(reg, k); return '<tr><td><b>' + esc(f.name) + '</b><div class="small muted">Scope ' + f.scope + ' · per ' + esc(f.activityUnit) + '</div></td><td class="mono">' + (f.value == null ? '<span class="chip st-missing">not set</span>' : esc(f.value) + ' <span class="small muted">' + esc(f.unit) + '</span>') + '</td><td>' + qchip(f.quality) + '</td><td class="small">' + esc(f.source) + (f.year ? ' (' + f.year + ')' : '') + (f.note ? '<br><span style="color:var(--amber)">' + esc(f.note) + '</span>' : '') + '</td><td class="mono">v' + f.latest + '</td><td><button type="button" class="btn sm" data-act="st-factor" data-arg="' + k + '">' + ic('plus') + 'New version</button></td></tr>'; }).join('') + '</tbody></table></div>',
           (stale ? '<span class="chip st-review">' + stale + ' records on an older version</span>' : '<span class="chip st-calculated">All records current</span>') + '<button type="button" class="btn sm' + (stale ? ' primary' : '') + '" data-act="st-recalc">' + ic('refresh-cw') + 'Recalculate</button>') +
-        sec('database', 'Workspace data', G.CarbonOpsCloud && G.CarbonOpsCloud.ready && A.auth.current() && !A.auth.current().demo ? 'Changes sync to your private Supabase workspace.' : 'Everything you change in the demo is kept in this browser.', '<div class="stack"><div class="row"><button type="button" class="btn danger" data-act="ws-fresh">' + ic('eraser') + 'Start with an empty workspace</button><span class="small muted">Removes all data so you can add your own factory from scratch.</span></div><div class="row"><button type="button" class="btn" data-act="st-reset">' + ic('database') + (A.F().blank ? 'Load the sample factory' : 'Reset demo data') + '</button><span class="small muted">Replaces everything with the fictional sample dataset (two factories).</span></div></div>');
+        sec('database', 'Workspace data', 'Everything you change is kept in this browser only.', '<div class="stack"><div class="row"><button type="button" class="btn danger" data-act="ws-fresh">' + ic('eraser') + 'Start with an empty workspace</button><span class="small muted">Removes all data so you can add your own factory from scratch.</span></div><div class="row"><button type="button" class="btn" data-act="st-reset">' + ic('database') + (A.F().blank ? 'Load the sample factory' : 'Reset demo data') + '</button><span class="small muted">Replaces everything with the fictional sample dataset (two factories).</span></div></div>');
     } else {
       const initials = (u.name || 'U').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
       const can = { 'Plant admin': ['Import and correct data', 'Change emission factors and prices', 'Approve and verify measures', 'Reset demo data'], 'Sustainability officer': ['Import and correct data', 'Change emission factors and prices', 'Approve and verify measures'], Viewer: ['View every page and report', 'Use the simulator and AI Advisor', 'Cannot change data, factors or statuses'] }[u.role] || [];
@@ -986,12 +1032,12 @@
         sec('user-round', 'Profile', 'How you appear in the audit trail and reports.',
           '<div class="fields">' + inp('st-user', 'Full name', u.name) + inp('st-email', 'Work email', u.email || '', 'email', ' placeholder="name@company.com"') + inp('st-uname', 'Username', u.username || '', 'text', ' placeholder="e.g. dheeraj.k"') +
           '<div class="field"><label for="st-role">Role</label><select id="st-role">' + ['Plant admin', 'Sustainability officer', 'Viewer'].map((x) => '<option' + (x === u.role ? ' selected' : '') + '>' + x + '</option>').join('') + '</select></div></div><div class="row"><button type="button" class="btn primary" data-act="st-user">Save profile</button><span id="st-user-msg" class="small muted"></span></div>') +
-        sec('shield-check', 'Sign-in and security', G.CarbonOpsCloud && G.CarbonOpsCloud.ready ? 'Password and session are managed by Supabase Auth.' : 'Password and session for this browser.',
+        sec('shield-check', 'Sign-in and security', 'Password and session for this browser.',
           (A.auth.current() && A.auth.current().demo
             ? '<div class="note small">You are using the shared demo account, which has no password. Create your own account from the sign-in page to set one.</div>'
             : '<form class="stack" data-form="pw" onsubmit="return false" novalidate><div class="fields">' + inp('st-pw-cur', 'Current password', '', 'password', ' autocomplete="current-password"') + inp('st-pw-new', 'New password', '', 'password', ' autocomplete="new-password" minlength="8"') + inp('st-pw-new2', 'Confirm new password', '', 'password', ' autocomplete="new-password"') + '</div><div class="row"><button type="button" class="btn primary" data-act="acct-pw">' + ic('key-round') + 'Change password</button><span id="st-pw-msg" class="small"></span></div></form>') +
           '<div class="row" style="border-top:1px solid var(--line-2);padding-top:12px"><button type="button" class="btn" data-act="pm-signout">' + ic('log-out') + 'Sign out</button><button type="button" class="btn ghost danger" data-act="acct-delete">' + ic('trash-2') + (A.auth.current() && A.auth.current().demo ? 'Clear demo workspace' : 'Delete account') + '</button></div>' +
-          '<p class="small muted" style="margin:0">' + (G.CarbonOpsCloud && G.CarbonOpsCloud.ready ? 'Your account and workspace are stored in the connected Supabase project.' : 'Accounts are kept in this browser only. Passwords are salted and hashed; they are never stored as text.') + '</p>') +
+          '<p class="small muted" style="margin:0">Accounts are kept in this browser only. Passwords are salted and hashed; they are never stored as text.</p>') +
         sec('palette', 'Appearance', 'Theme and how numbers are shown.',
           '<div class="field"><span class="lab">Theme</span><div class="seg" role="group" aria-label="Theme"><button type="button" class="' + (A.theme() === 'dark' ? 'on' : '') + '" data-act="theme-set" data-arg="dark">' + ic('moon') + ' Dark</button><button type="button" class="' + (A.theme() === 'light' ? 'on' : '') + '" data-act="theme-set" data-arg="light">' + ic('sun') + ' Light</button></div></div>' +
           '<div class="field"><label for="st-cmp">Compare periods with</label><select id="st-cmp" data-ch="compare"><option value="yoy"' + (S().compare === 'yoy' ? ' selected' : '') + '>Same period last year</option><option value="prev"' + (S().compare === 'prev' ? ' selected' : '') + '>Previous period</option></select></div>' +

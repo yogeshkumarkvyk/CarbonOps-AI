@@ -54,11 +54,7 @@
   let saveTimer = null;
   function save() {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => {
-      try { if (S) localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) { /* ignore */ }
-      const user = G.CarbonOpsCloud && G.CarbonOpsCloud.ready && G.CarbonOps.auth.current();
-      if (S && user && !user.demo) G.CarbonOpsCloud.saveWorkspace(user.id, S).catch((e) => console.error('CarbonOps cloud save failed:', e.message));
-    }, 400);
+    saveTimer = setTimeout(() => { try { if (S) localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) { /* ignore */ } }, 150);
   }
   function F() { return S.factories[S.factoryId]; }
   function audit(action, detail) { F().audit.unshift({ at: E.nowStamp(), user: S.settings.user.name + ' (' + S.settings.user.role + ')', action, detail }); }
@@ -815,9 +811,9 @@
   function bpStage(vm, m) {
     const bp = bpOf(); const t = UI.twin;
     if (!bp) {
-      return '<div class="bp-empty" data-drop="bp"><div class="ai-orb" aria-hidden="true">' + ic('map') + '</div><h3>Add your own floor plan</h3><p class="small muted">Upload a blueprint, CAD export or a photo of the plant layout. Then mark where each area is, and the plan becomes clickable and coloured by emissions.</p>' +
-        '<div class="row" style="justify-content:center"><label class="btn primary" for="bp-file">' + ic('upload') + 'Upload floor plan</label><input type="file" id="bp-file" accept="image/png,image/jpeg,image/webp,image/gif,.pdf,application/pdf" data-ch="bp-file" hidden/><button type="button" class="btn" data-act="bp-sample">' + ic('image') + 'Try a sample plan</button></div>' +
-        '<p class="small muted" style="margin:0">PNG, JPG or WebP. For a PDF or DWG drawing, export the page as an image first. ' + (G.CarbonOpsCloud && G.CarbonOpsCloud.ready && G.CarbonOps.auth.current() && !G.CarbonOps.auth.current().demo ? 'The plan syncs to your private cloud workspace.' : 'The plan is stored in this browser only.') + '</p></div>';
+      return '<div class="bp-empty" data-drop="bp"><div class="ai-orb" aria-hidden="true">' + ic('map') + '</div><h3>Add your own floor plan</h3><p class="small muted">Upload a blueprint, CAD export or a photo of the plant layout. AI reads every room and label and turns the drawing into a 3D model coloured by emissions.</p>' +
+        '<div class="row" style="justify-content:center"><label class="btn primary" for="bp-file">' + ic('upload') + 'Upload floor plan</label><input type="file" id="bp-file" accept="image/png,image/jpeg,image/webp,image/gif,.pdf,application/pdf" data-ch="bp-file" hidden/><button type="button" class="btn" data-act="bp-sample-ai">' + ic('scan-eye') + 'Sample drawing (AI reads it)</button><button type="button" class="btn ghost" data-act="bp-sample">' + ic('image') + 'Sample with rooms placed</button></div>' +
+        '<p class="small muted" style="margin:0">PNG, JPG, WebP or PDF. AI finds every room on the drawing and builds a 3D model of your plant. The plan is stored in this browser only.</p>' + (G.CarbonOps.aiStatusLine ? '<div class="small">' + G.CarbonOps.aiStatusLine() + '</div>' : '') + '</div>';
     }
     const W = bp.w, H = bp.h; const c = t.color;
     const vals = {}; D.AREAS.forEach((a) => { vals[a.id] = twinValue(m, a.id); });
@@ -840,12 +836,13 @@
     const placed = new Set(bp.zones.map((z) => z.area).filter(Boolean));
     const missing = D.AREAS.filter((a) => !placed.has(a.id));
     const edit = t.bpEdit ? '<div class="bp-tools"><div class="row" style="gap:8px"><b class="small">' + (F().blank ? 'Edit rooms' : 'Edit zones') + '</b>' + (F().blank ? '<label for="bp-name" class="small muted">Name of the next room</label><input type="text" id="bp-name" placeholder="e.g. Chiller" value="' + esc(t.bpName || '') + '" data-ch="bp-name" style="width:180px"/><span class="small muted">then drag a box around it on the plan.</span><span hidden>' : '') + '<label for="bp-area" class="small muted">Next box is</label><select id="bp-area" data-ch="bp-area">' + D.AREAS.map((a) => '<option value="' + a.id + '"' + (a.id === (t.bpArea || missing[0] && missing[0].id || 'lineA') ? ' selected' : '') + '>' + esc(a.name) + (placed.has(a.id) ? ' ✓' : '') + '</option>').join('') + '</select><span class="small muted">Drag a box around it on the plan.</span>' + (F().blank ? '</span>' : '') + '</div>' +
-      '<div class="row" style="gap:6px">' + (CAP.sample && CAP.images ? '<button type="button" class="btn sm" data-act="bp-ai"' + (t.bpBusy ? ' disabled' : '') + '>' + (t.bpBusy ? '<span class="spinner"></span> Looking at the plan…' : ic('scan-eye') + 'Read labels with AI') + '</button>' : '') + '<button type="button" class="btn sm primary" data-act="bp-edit">' + ic('check') + 'Done</button></div>' +
+      '<div class="row" style="gap:6px">' + '<button type="button" class="btn sm" data-act="bp-ai"' + (t.bpBusy ? ' disabled' : '') + '>' + (t.bpBusy ? '<span class="spinner"></span> Looking at the plan…' : ic('scan-eye') + (CAP.sample ? 'Read plan with AI' : 'Connect AI to read the plan')) + '</button>' + '<button type="button" class="btn sm primary" data-act="bp-edit">' + ic('check') + 'Done</button></div>' +
       (bp.zones.length ? '<div class="bp-list">' + bp.zones.map((z, i) => '<span class="bp-chip' + (F().blank || D.AREAS.some((a) => a.id === z.area) ? '' : ' free') + '">' + (i + 1) + '. ' + (F().blank ? '<input type="text" aria-label="Name of room ' + (i + 1) + '" value="' + esc(z.label || '') + '" data-ch="bp-rename" data-i="' + i + '" style="width:150px;min-height:26px;padding:2px 6px;font-size:12px"/>' : (z.label ? '<b>' + esc(z.label) + '</b> → ' : '') + '<select aria-label="Emissions area for zone ' + (i + 1) + '" data-ch="bp-link" data-i="' + i + '"><option value="">Not linked</option>' + D.AREAS.map((a) => '<option value="' + a.id + '"' + (a.id === z.area ? ' selected' : '') + '>' + esc(a.name) + '</option>').join('') + '</select>') + (z.ai ? ' <i>AI' + (z.conf ? ' · ' + esc(z.conf) : '') + '</i>' : '') + '<button type="button" data-act="bp-del" data-arg="' + i + '" aria-label="Remove zone ' + (i + 1) + '">×</button></span>').join('') + '</div>' : '') + '</div>' : '';
     return '<div class="bp-wrap' + (t.bpEdit ? ' editing' : '') + '">' + edit +
       '<svg id="bp-svg" viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Your floor plan with emission zones"><image href="' + bp.img + '" x="0" y="0" width="' + W + '" height="' + H + '"/>' + zones + '<rect id="bp-temp" class="bp-temp" x="0" y="0" width="0" height="0"/></svg>' +
+      (t.bpBusy ? '<div class="bp-scan" aria-live="polite"><i class="bp-scanline"></i><div class="bp-scan-msg"><span class="spinner"></span><b>AI is reading your floor plan <span id="bp-secs"></span></b><small id="bp-stat">' + esc(t.bpStatus || 'Finding rooms, labels and equipment. Big drawings take 20–60 seconds.') + '</small><button type="button" class="btn sm" data-act="bp-skip">Skip AI · build from the walls now</button></div></div>' : '') +
       (!t.bpEdit ? '<div class="tw-tag">' + (m.scenario ? '<span class="chip st-simulated">What-if (simulated)</span>' : '<span class="chip st-calculated">Recorded · ' + esc(vm.period.label) + '</span>') + '<span class="small muted">' + esc(bp.name) + '</span></div>' +
-        '<div class="tw-zoom"><button type="button" class="btn sm primary" data-act="twin-layout" data-arg="plan3d"' + (bp.zones.length ? '' : ' disabled') + '>' + ic('box') + 'View in 3D</button>' + (CAP.sample && CAP.images ? '<button type="button" class="btn sm" data-act="bp-ai"' + (t.bpBusy ? ' disabled' : '') + '>' + (t.bpBusy ? '<span class="spinner"></span> Reading the plan…' : ic('scan-eye') + 'Read labels with AI') + '</button>' : '') + '<button type="button" class="btn sm" data-act="bp-edit">' + ic('pencil') + 'Edit zones</button><button type="button" class="btn sm ghost" data-act="bp-remove">Remove plan</button></div>' +
+        '<div class="tw-zoom"><button type="button" class="btn sm primary" data-act="twin-layout" data-arg="plan3d"' + (bp.zones.length ? '' : ' disabled') + '>' + ic('box') + 'View in 3D</button>' + '<button type="button" class="btn sm" data-act="bp-ai"' + (t.bpBusy ? ' disabled' : '') + '>' + (t.bpBusy ? '<span class="spinner"></span> Reading the plan…' : ic('scan-eye') + (CAP.sample ? 'Read plan with AI' : 'Connect AI')) + '</button>' + '<button type="button" class="btn sm" data-act="bp-edit">' + ic('pencil') + 'Edit zones</button><button type="button" class="btn sm ghost" data-act="bp-remove">Remove plan</button></div>' +
         '<div class="tw-legend">' + (G.CarbonOps.planBanner ? G.CarbonOps.planBanner() : '') + (missing.length ? '<span class="small muted">Not placed yet: ' + missing.map((a) => esc(a.name)).join(', ') + '</span>' : '<span class="small muted">All areas placed. Click a zone for details.</span>') + '</div>' : '') +
       '</div>';
   }
@@ -882,7 +879,11 @@
       const k = Math.min(1, 1600 / Math.max(img.naturalWidth, img.naturalHeight));
       const w = Math.round(img.naturalWidth * k), h = Math.round(img.naturalHeight * k);
       const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const cx = cv.getContext('2d');
-      cx.fillStyle = '#ffffff'; cx.fillRect(0, 0, w, h); cx.drawImage(img, 0, 0, w, h); URL.revokeObjectURL(url);
+      cx.fillStyle = '#ffffff'; cx.fillRect(0, 0, w, h); cx.drawImage(img, 0, 0, w, h);
+      // a sharper copy (up to 2400 px) is kept in memory only, so the AI can read small labels on big factory drawings
+      const k2 = Math.min(1, 2400 / Math.max(img.naturalWidth, img.naturalHeight));
+      if (k2 > k + 0.05) { const c2 = document.createElement('canvas'); c2.width = Math.round(img.naturalWidth * k2); c2.height = Math.round(img.naturalHeight * k2); const x2 = c2.getContext('2d'); x2.fillStyle = '#ffffff'; x2.fillRect(0, 0, c2.width, c2.height); x2.drawImage(img, 0, 0, c2.width, c2.height); UI.bpHi = c2.toDataURL('image/jpeg', 0.9); } else UI.bpHi = null;
+      URL.revokeObjectURL(url);
       setPlan(cv.toDataURL('image/jpeg', 0.85), w, h, name || file.name, []);
     };
     img.onerror = () => { URL.revokeObjectURL(url); toast('That image could not be opened. Try saving it again as PNG or JPG.'); };
@@ -894,8 +895,8 @@
     audit('Floor plan added', name + ' (' + w + '×' + h + ')');
     try { localStorage.setItem('carbonops-bp-check', dataUrl); localStorage.removeItem('carbonops-bp-check'); } catch (e) { toast('Plan added, but it is too large to keep after a reload in this browser.'); }
     save(); render();
-    if (!zones.length && F().blank && CAP.sample && CAP.images) { toast('Reading the room names on your plan…'); setTimeout(() => ACT['bp-ai'](), 60); }
-    else if (!zones.length) toast(F().blank ? 'Type a room name, then drag a box around that room on the plan' : 'Now drag a box around each area on your plan');
+    if (!zones.length && CAP.sample && CAP.images) { toast('AI is reading your floor plan…'); setTimeout(() => ACT['bp-ai'](), 60); }
+    else if (!zones.length) setTimeout(() => (isSamplePlan(bpOf()) && G.CO_SAMPLE_ROOMS ? ACT['bp-ai']() : ACT['bp-auto']()), 60);
   }
   function drawSamplePlan() {
     const S2 = 44, ox = 60, oy = 70; const W = 32 * S2 + ox * 2, H = 26 * S2 + oy + 50;
@@ -919,37 +920,108 @@
   CH['bp-file'] = (v, el) => readPlan(el.files[0], el.files[0] && el.files[0].name);
   CH['bp-area'] = (v) => { UI.twin.bpArea = v; };
   ACT['bp-sample'] = () => { const s = drawSamplePlan(); setPlan(s.img, s.w, s.h, 'Sample site layout (drawing DPC-SL-01)', s.zones); toast('Sample plan loaded with zones already placed. Use Edit zones to change them.'); };
+  ACT['bp-sample-ai'] = () => {
+    const go2 = () => { const u = G.CO_SAMPLE_PLAN; if (!u) { toast('The sample drawing could not be loaded.'); return; } readPlan(new File([dataUrlToBlob(u)], 'sample-factory-plan.png', { type: 'image/png' }), 'Sample factory drawing (DPC-P2-GF-01)'); };
+    if (G.CO_SAMPLE_PLAN) return go2();
+    const sc = document.createElement('script'); sc.src = 'samples/sample-plan.js'; sc.onload = go2; sc.onerror = () => toast('The sample drawing could not be loaded.'); document.head.appendChild(sc);
+  };
   ACT['bp-edit'] = () => { UI.twin.bpEdit = !UI.twin.bpEdit; if (UI.twin.bpEdit && !UI.twin.bpArea) UI.twin.bpArea = 'lineA'; refreshLive(['twin-map']); };
   ACT['bp-del'] = (i) => { const bp = bpOf(); bp.zones.splice(Number(i), 1); save(); refreshLive(['twin-map']); };
   ACT['bp-remove'] = () => { UI.modal = () => '<h2 style="font-size:17px">Remove this floor plan?</h2><p style="margin:0">The plan image and its zones are removed. Your emissions data is not affected.</p><div class="row"><button type="button" class="btn danger" data-act="bp-remove-ok">Remove</button><button type="button" class="btn" data-act="close">Cancel</button></div>'; renderOverlay(); };
   ACT['bp-remove-ok'] = () => { delete F().blueprint; UI.modal = null; UI.twin.bpEdit = false; audit('Floor plan removed', ''); save(); renderOverlay(); render(); };
-  ACT['bp-ai'] = async () => {
-    const bp = bpOf(); if (!CAP.sample || !bp || UI.twin.bpBusy) return;
-    UI.twin.bpBusy = true; refreshLive(['twin-map']);
-    try {
-      const blob = dataUrlToBlob(bp.img);
-      const blankWs = !!F().blank;
-      const list = blankWs ? '(no list: set area to null for every room)' : D.AREAS.map((a) => a.id + ' = ' + a.name + ' (' + a.equipment + ')').join('\n');
-      const res = await CAP.sample.json('This image is a floor plan or layout drawing of a factory. Use the text labels printed on the drawing (room names, area names, or numbers explained in a legend) to find each room or zone.\n' +
-        'For every labelled room give: label = the label text exactly as printed; x, y, w, h = a tight box around that room\'s walls (not just around the text), as fractions 0 to 1 of the image width and height measured from the top-left corner; area = the best match from this list of factory areas, or null if none fits; confidence = "high", "medium" or "low" for the match.\n' + list +
-        '\nRooms that are not on the list (offices, toilets, canteen, paint shop and so on) must still be included, with area null. Several rooms may match the same area. Do not invent rooms that are not drawn, and ignore title blocks, legends and dimension text.\n' +
-        'Reply with only JSON: {"zones":[{"label": string, "area": string|null, "confidence": "high"|"medium"|"low", "x": number, "y": number, "w": number, "h": number}], "notes": string}', { images: [blob], modelTier: 'default' });
-      const ok = (z) => z && [z.x, z.y, z.w, z.h].every((v) => typeof v === 'number' && v >= 0 && v <= 1) && z.w > 0.01 && z.h > 0.01;
-      const zs = (res && Array.isArray(res.zones) ? res.zones : []).filter(ok).slice(0, 40).map((z) => ({
-        area: !blankWs && D.AREAS.some((a) => a.id === z.area) ? z.area : null, label: String(z.label || '').trim().slice(0, 40),
-        x: z.x, y: z.y, w: Math.min(z.w, 1 - z.x), h: Math.min(z.h, 1 - z.y), ai: true, conf: ['high', 'medium', 'low'].includes(z.confidence) ? z.confidence : 'low'
-      }));
-      if (zs.length) bp.zones = bp.zones.filter((z) => !z.ai).concat(zs);
-      const linked = zs.filter((z) => z.area).length;
-      audit('AI read floor plan labels', zs.length + ' rooms found on ' + bp.name + ', ' + linked + ' linked to emissions areas (unconfirmed)');
-      save();
-      if (blankWs) { toast(zs.length ? 'Found ' + zs.length + ' rooms on your plan. They are now your factory\'s areas.' : 'No labelled rooms could be read. Type a room name and drag a box around it.'); if (zs.length) { UI.twin.bpEdit = false; UI.twin.layout = 'plan3d'; } else UI.twin.bpEdit = true; }
-      else { toast(zs.length ? 'Found ' + zs.length + ' labelled rooms; ' + linked + ' linked to emissions areas. Check the links, then View in 3D.' : 'No labelled rooms could be read. Draw the zones by hand.'); if (zs.length) UI.twin.bpEdit = true; }
-    } catch (e) {
-      toast(e && e.code === 'not_granted' ? 'Permission to use Claude was declined. Draw the zones by hand.' : 'Reading the plan failed (' + ((e && e.code) || 'error') + '). Draw the zones by hand.');
+  const ROOM_KINDS = ['production', 'assembly', 'boiler', 'generator', 'compressor', 'cooling', 'electrical', 'utility', 'storage', 'warehouse', 'loading', 'office', 'lab', 'canteen', 'toilet', 'corridor', 'outdoor', 'other'];
+  function planPrompt(blankWs) {
+    const list = blankWs ? '(none: set "area" to null for every room)' : D.AREAS.map((a) => a.id + ' = ' + a.name + ' (' + a.equipment + ')').join('\n');
+    return 'You are reading an architectural floor plan / site layout drawing of a factory so it can be rebuilt as a 3D model.\n' +
+      'Find EVERY enclosed room, hall, shed, bay or zone drawn on the plan (large plants can have 50+). Use the text printed inside or next to each room; if the plan uses numbers or codes, resolve them with the legend. If a room has no label, name it from its drawn symbols (e.g. machines, racks, desks, toilets) and set confidence "low".\n' +
+      'For each room return:\n' +
+      '- label: the name exactly as printed (or your short name if unlabelled)\n' +
+      '- kind: one of ' + ROOM_KINDS.join(', ') + '\n' +
+      '- box_2d: [ymin, xmin, ymax, xmax] of the room\'s WALLS (not just its text), as integers 0-1000 relative to the full image height (y) and width (x)\n' +
+      '- area: the best matching id from this list of the factory\'s emission areas, or null if none fits:\n' + list + '\n' +
+      '- confidence: "high", "medium" or "low"\n' +
+      '- equipment: up to 4 short names of equipment drawn or written in the room (e.g. "Boiler", "DG set", "Air compressor", "Chiller", "CNC machines", "Racks"); [] if none\n' +
+      'Rules: rooms must not be the title block, legend, north arrow, dimension strings or notes. Corridors and open yards may be included with kind "corridor"/"outdoor". Several rooms may share one area id. Do not invent rooms that are not drawn.\n' +
+      'Reply with only JSON: {"title": string, "rooms": [{"label": string, "kind": string, "box_2d": [number, number, number, number], "area": string|null, "confidence": string, "equipment": [string]}], "notes": string}';
+  }
+  function planZonesFrom(res, blankWs) {
+    const raw = (res && (Array.isArray(res.rooms) ? res.rooms : Array.isArray(res.zones) ? res.zones : Array.isArray(res) ? res : [])) || [];
+    const out = [];
+    raw.forEach((z) => {
+      if (!z) return; let x, y, w, h;
+      const b = z.box_2d || z.box || z.bbox;
+      if (Array.isArray(b) && b.length === 4 && b.every((v) => typeof v === 'number')) {
+        const sc = Math.max(...b) > 1.5 ? 1000 : 1; const [y0, x0, y1, x1] = b.map((v) => v / sc);
+        x = Math.min(x0, x1); y = Math.min(y0, y1); w = Math.abs(x1 - x0); h = Math.abs(y1 - y0);
+      } else if ([z.x, z.y, z.w, z.h].every((v) => typeof v === 'number')) { const sc = Math.max(z.x + z.w, z.y + z.h) > 1.5 ? 1000 : 1; x = z.x / sc; y = z.y / sc; w = z.w / sc; h = z.h / sc; }
+      else return;
+      x = Math.max(0, Math.min(1, x)); y = Math.max(0, Math.min(1, y)); w = Math.min(w, 1 - x); h = Math.min(h, 1 - y);
+      if (!(w > 0.008 && h > 0.008)) return;
+      if (w > 0.97 && h > 0.97) return; // the whole sheet is not a room
+      const kind = ROOM_KINDS.includes(String(z.kind || '').toLowerCase()) ? String(z.kind).toLowerCase() : 'other';
+      out.push({ area: !blankWs && D.AREAS.some((a) => a.id === z.area) ? z.area : null, label: String(z.label || z.name || '').trim().slice(0, 40) || (kind.charAt(0).toUpperCase() + kind.slice(1)),
+        x, y, w, h, ai: true, kind, equip: (Array.isArray(z.equipment) ? z.equipment : []).map((e) => String(e).slice(0, 30)).slice(0, 4), conf: ['high', 'medium', 'low'].includes(z.confidence) ? z.confidence : 'low' });
+    });
+    return out.slice(0, 90);
+  }
+  // ---- AI reading of the plan, with a saved copy per image and fallbacks so the 3D model always gets built ----
+  function imgHash(u) { let h = 5381; const st = Math.max(1, Math.floor(u.length / 4000)); for (let i = 0; i < u.length; i += st) h = ((h * 33) ^ u.charCodeAt(i)) >>> 0; return u.length.toString(36) + '-' + h.toString(36); }
+  const PLAN_CACHE = 'carbonops-plan-ai:';
+  const isSamplePlan = (bp) => /^Sample factory drawing/.test(bp.name || '');
+  function applyRooms(bp, zs, msg, how) {
+    const blankWs = !!F().blank;
+    bp.zones = bp.zones.filter((z) => !z.ai && !z.auto).concat(zs);
+    const linked = zs.filter((z) => z.area).length;
+    audit(how === 'auto' ? 'Rooms detected from the drawing' : 'AI read floor plan', zs.length + ' rooms on ' + bp.name + (blankWs || how === 'auto' ? '' : ', ' + linked + ' linked to emissions areas (unconfirmed)'));
+    save(); UI.twin.bpEdit = false; UI.twin.layout = 'plan3d'; UI.twin.build3d = Date.now();
+    toast(msg.replace('{n}', zs.length).replace('{l}', linked));
+  }
+  async function detectWithoutAI(bp, why) {
+    const P = G.CarbonOps.plan3d; const zs = P && P.autoRooms ? await P.autoRooms(bp) : [];
+    if (zs.length) { applyRooms(bp, zs, (why ? why + ' ' : '') + 'Found {n} rooms from the walls of the drawing. Rename or link them in Edit rooms' + (CAP.sample ? ', or press Re-read later.' : '. Connect AI to read the names automatically.'), 'auto'); return true; }
+    return false;
+  }
+  ACT['bp-auto'] = async () => { const bp = bpOf(); if (!bp) return; UI.twin.bpBusy = true; refreshLive(['twin-map']); const ok = await detectWithoutAI(bp, ''); UI.twin.bpBusy = false; if (!ok) { UI.twin.bpEdit = true; toast('No enclosed rooms were found on this drawing. Draw the rooms by hand.'); } render(); };
+  ACT['bp-ai'] = async (mode) => {
+    const bp = bpOf(); if (!bp || UI.twin.bpBusy) return;
+    const blankWs = !!F().blank; const key = PLAN_CACHE + imgHash(bp.img);
+    if (mode !== 'fresh') { // the same drawing was read before: reuse it (no AI call)
+      let saved = null; try { saved = JSON.parse(localStorage.getItem(key) || 'null'); } catch (e) { /* ignore */ }
+      const zs = saved ? planZonesFrom(saved, blankWs) : [];
+      if (zs.length) { applyRooms(bp, zs, 'Loaded the AI reading saved for this plan: {n} rooms. Building the 3D model…'); render(); return; }
     }
-    UI.twin.bpBusy = false; if (F().blank) render(); else refreshLive(['twin-map']);
+    if (!CAP.sample) {
+      if (isSamplePlan(bp) && G.CO_SAMPLE_ROOMS) { applyRooms(bp, planZonesFrom(G.CO_SAMPLE_ROOMS, blankWs), 'Sample drawing: {n} rooms (saved AI reading). Building the 3D model…'); render(); return; }
+      if (ACT['ai-connect']) ACT['ai-connect'](); return;
+    }
+    UI.twin.bpBusy = true; UI.twin.bpEdit = false; UI.twin.bpStatus = ''; refreshLive(['twin-map']);
+    // time limit + live status, so a slow or overloaded AI never leaves the page stuck
+    const ctl = new AbortController(); const t0 = Date.now(); const LIMIT = 75;
+    PLAN_RUN.ctl = ctl; PLAN_RUN.why = null;
+    const tick = setInterval(() => { const s = Math.round((Date.now() - t0) / 1000); const el = document.getElementById('bp-secs'); if (el) el.textContent = '· ' + s + 's'; if (s >= LIMIT && !ctl.signal.aborted) { PLAN_RUN.why = 'timeout'; ctl.abort(); } }, 1000);
+    const status = (kind, model) => { UI.twin.bpStatus = kind === 'busy' ? model + ' is busy, retrying with another model…' : 'Asking ' + model + '…'; const el = document.getElementById('bp-stat'); if (el) el.textContent = UI.twin.bpStatus; };
+    try {
+      const blob = dataUrlToBlob(UI.bpHi || bp.img);
+      const res = await CAP.sample.json(planPrompt(blankWs), { images: [blob], modelTier: 'default', maxTokens: 12000, signal: ctl.signal, onStatus: status });
+      const zs = planZonesFrom(res, blankWs);
+      if (zs.length) {
+        bp.aiTitle = res && res.title ? String(res.title).slice(0, 80) : null;
+        try { localStorage.setItem(key, JSON.stringify({ rooms: res.rooms || res.zones || res, title: res.title || null })); } catch (e) { /* ignore */ }
+        applyRooms(bp, zs, blankWs ? 'Found {n} rooms. Building your 3D factory…' : 'Found {n} rooms ({l} linked to emissions areas). Building the 3D model…');
+      } else if (!(await detectWithoutAI(bp, 'The AI found no labelled rooms.'))) { UI.twin.bpEdit = true; toast('No rooms could be read on this drawing. Draw the rooms by hand.'); }
+    } catch (e) {
+      let code = e && e.code;
+      if (code === 'cancelled' && PLAN_RUN.why) code = PLAN_RUN.why; // timed out or skipped, not stopped by the user
+      const why = { timeout: 'The AI took too long to answer.', skipped: 'Skipped the AI.', not_granted: 'Permission to use AI was declined.', not_configured: 'AI is not connected.', bad_key: 'The AI key was rejected.', rate_limited: 'The AI is busy right now (free-tier limit).', overloaded: 'The AI is in high demand right now.', network: 'No internet connection.', bad_json: 'The AI reply could not be read.', too_large: 'The image is too large for the AI.' }[code] || ('Reading the plan failed (' + ((e && (e.message || code)) || 'error') + ').');
+      if (code === 'cancelled') toast('Reading stopped.');
+      else if (isSamplePlan(bp) && G.CO_SAMPLE_ROOMS) applyRooms(bp, planZonesFrom(G.CO_SAMPLE_ROOMS, blankWs), why + ' Used the saved reading of the sample drawing ({n} rooms).');
+      else if (!(await detectWithoutAI(bp, why))) { toast(why + ' You can draw the rooms by hand.'); UI.twin.bpEdit = true; }
+    }
+    clearInterval(tick); PLAN_RUN.ctl = null; UI.twin.bpStatus = '';
+    UI.twin.bpBusy = false; render();
   };
+  const PLAN_RUN = { ctl: null, why: null };
+  ACT['bp-skip'] = () => { if (PLAN_RUN.ctl) { PLAN_RUN.why = 'skipped'; PLAN_RUN.ctl.abort(); } };
   CH['bp-name'] = (v) => { UI.twin.bpName = v; };
   CH['bp-rename'] = (v, el) => { const bp = bpOf(); const z = bp && bp.zones[Number(el.dataset.i)]; if (!z) return; z.label = v.trim() || z.label; if (F().roomNames && z.area) F().roomNames[z.area] = (G.CarbonOps.niceLabel || String)(z.label); save(); render(); };
   CH['bp-link'] = (v, el) => { const bp = bpOf(); const z = bp && bp.zones[Number(el.dataset.i)]; if (!z) return; z.area = v || null; if (z.ai) z.conf = 'you'; save(); refreshLive(['twin-map']); };
@@ -1148,11 +1220,7 @@
 
   // ---------------- Capabilities ----------------
   function initCaps() {
-    if (G.CarbonOpsCloud && G.CarbonOpsCloud.ready) {
-      CAP.sample = G.CarbonOpsCloud.sample; CAP.images = true; CAP.checked = true; render();
-      return;
-    }
-    if (!G.claude || !G.claude.use) { CAP.checked = true; return; }
+    if (!G.claude || !G.claude.use) { if (G.CO_AI) G.CO_AI.init(CAP, () => { CAP.checked = true; render(); }); else CAP.checked = true; return; }
     G.claude.use('sample').then(async (s) => {
       CAP.sample = s || null;
       if (s) { try { const l = await s.limits(); CAP.images = !!(l && l.images); } catch (e) { CAP.images = false; } }
@@ -1181,20 +1249,10 @@
     initCaps();
     G.CarbonOps.auth.start();
   }
-  async function startSession(acc) {
+  function startSession(acc) {
     STORE = KEY + ':' + acc.id;
     if (G.CarbonOps.resetMonths) G.CarbonOps.resetMonths();
     S = load(acc);
-    if (G.CarbonOpsCloud && G.CarbonOpsCloud.ready && !acc.demo) {
-      try {
-        const cloudState = await G.CarbonOpsCloud.loadWorkspace(acc.id);
-        if (cloudState && cloudState.v === 1 && cloudState.factories) {
-          if (E.migrateGrid(cloudState)) G.CarbonOpsCloud.saveWorkspace(acc.id, cloudState).catch((e) => console.error('CarbonOps cloud migration save failed:', e.message));
-          S = cloudState;
-        }
-        else G.CarbonOpsCloud.saveWorkspace(acc.id, S).catch((e) => console.error('CarbonOps cloud save failed:', e.message));
-      } catch (e) { console.error('Could not load the cloud workspace:', e.message); }
-    }
     if (!S.factories[S.factoryId]) S.factoryId = 'f1';
     S.settings.user = Object.assign({}, S.settings.user, { name: acc.name, role: acc.role || 'Plant admin', email: acc.email || '' });
     UI.drawer = null; UI.modal = null; UI.profileOpen = false; UI.notifOpen = false; UI.sim.params = null; UI.advisor.turns = [];
@@ -1211,6 +1269,6 @@
   G.CarbonOps = {
     boot, startSession, endSession, appEnter, blankState, VIEWS, LIVE, ACT, CH, IN, CHART_CLICK, UI, CAP, get S() { return S; }, set S(v) { S = v; }, F, save, render, refreshLive, renderOverlay, toast, go, audit, derive, portfolio, ph, icons,
     theme, readPlan, carousel, CAT_PLAIN, n, tco2, inr, pct, ic, chip, qchip, ST, area, catLabel, catColor, areaColor, deltaHTML, alertList, offerFile, seedState, KEY, get VM() { return VM; },
-    slider, clone
+    slider, clone, twinMetrics, twinValue
   };
 })(window);
