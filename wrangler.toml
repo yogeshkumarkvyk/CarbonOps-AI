@@ -1,3 +1,6 @@
 name = "carbonops-ai"
 compatibility_date = "2026-10-15"
 pages_build_output_dir = "."
+
+[vars]
+GEMINI_MODEL = "gemini-3.8-flash"

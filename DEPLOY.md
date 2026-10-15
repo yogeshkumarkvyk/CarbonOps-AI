@@ -1,6 +1,6 @@
 # Publish CarbonOps for a free-start deployment
 
-This project uses Cloudflare Pages for the static site and API functions, Supabase for account authentication, Postgres and private file storage, and OpenRouter for optional hosted model inference. Free quotas and provider terms can change.
+This project uses Cloudflare Pages for the static site and API functions, Supabase for account authentication, Postgres and private file storage, and Google's Gemini API for optional hosted model inference. Free quotas and provider terms can change.
 
 ## 1. Supabase project (already created)
 
@@ -14,7 +14,7 @@ The current schema gives each account a private workspace. It does not yet imple
 
 ## 2. Connect a private GitHub repository
 
-Create a private GitHub repository and add the contents of this folder at its root. Then connect the repository to Cloudflare Pages. Keep `.dev.vars`, `.env` files, API keys, and service-role keys out of Git. The Supabase URL and publishable key in `config.js` are browser-visible public settings.
+Connect this folder to the CarbonOps-AI GitHub repository and Cloudflare Pages. Keep `.dev.vars`, `.env` files, API keys, and service-role keys out of Git. The Supabase URL and publishable key in `config.js` are browser-visible public settings.
 
 ## 3. Deploy the site
 
@@ -27,23 +27,24 @@ Use Git integration from the start so pushes deploy automatically. Cloudflare do
 
 ## 4. Configure AI requests (optional)
 
-Create an OpenRouter key. In Cloudflare Pages, open the project's **Settings → Variables and Secrets** and add these as encrypted secrets or variables:
+Create a Gemini API key in Google AI Studio using a project on the Free tier. Do not link billing if the deployment must remain strictly free. Free-tier limits apply, and Google may use data submitted through the Free tier to improve its products; do not send sensitive customer or company data unless that processing is acceptable.
 
-- `OPENROUTER_API_KEY` — secret API key.
-- `OPENROUTER_MODEL` — model ID supported by OpenRouter. For a free multimodal prototype, check its current model list for a free vision-capable model; `google/gemma-4-31b-it:free` was listed as image-capable when this setup was written. Free model availability and rate limits change.
+In Cloudflare Pages, open the project's **Settings → Variables and Secrets** and add these bindings:
+
+- `GEMINI_API_KEY` — encrypted secret. Never add it to browser code or GitHub.
+- `GEMINI_MODEL` — set in `wrangler.toml` to `gemini-3.8-flash`. This model ID is pinned; the app does not fall back to another model.
 - `SUPABASE_URL` — project URL.
 - `SUPABASE_ANON_KEY` — publishable/anon key, used by the function to validate signed-in users.
 - `SUPABASE_SERVICE_ROLE_KEY` — secret used for the AI quota check and account deletion. It bypasses RLS and must be stored only in Cloudflare's encrypted secret settings.
 
-Redeploy after adding variables. Free model routes can be busy, rate-limited, or changed by the provider. CarbonOps currently caps AI calls at 30 per signed-in user per hour. AI features will report an error when the model is unavailable; manual entry and rule-based answers remain available.
+Redeploy after adding the Gemini secret. Requests use the Gemini Free tier only; when Google's quota is exhausted, the request fails instead of switching to a paid provider or model. CarbonOps also caps AI calls at 30 per signed-in user per hour. AI features will report an error when Gemini is unavailable; manual entry and rule-based answers remain available.
 
 ## 5. Optional local Pages Functions preview
 
 Install Wrangler on your development machine and use `wrangler pages dev .`. Put local function secrets in `.dev.vars` (ignored by Git):
 
 ```dotenv
-OPENROUTER_API_KEY=your-key
-OPENROUTER_MODEL=your-model-id
+GEMINI_API_KEY=your-free-tier-key
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_ANON_KEY=your-publishable-key
 SUPABASE_SERVICE_ROLE_KEY=your-service-role-key

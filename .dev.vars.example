@@ -1,5 +1,4 @@
-OPENROUTER_API_KEY=replace-me
-OPENROUTER_MODEL=google/gemma-4-31b-it:free
+GEMINI_API_KEY=replace-me
 SUPABASE_URL=https://YOUR_PROJECT_REF.supabase.co
 SUPABASE_ANON_KEY=replace-me
 SUPABASE_SERVICE_ROLE_KEY=replace-me
