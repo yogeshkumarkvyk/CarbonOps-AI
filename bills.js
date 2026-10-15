@@ -6,7 +6,6 @@
   const D = G.CO_DATA, E = G.CO_ENGINE, C = G.CO_CHARTS, esc = C.esc;
   const A = G.CarbonOps;
   const { ACT, CH, UI, CAP, n, ic, toast, render, save, audit, go, area, catLabel } = A;
-  const modelName = () => G.CarbonOpsCloud && G.CarbonOpsCloud.ready ? 'AI model' : 'Claude';
   const S = () => A.S; const F = () => A.F();
   const canEdit = () => S().settings.user.role !== 'Viewer';
   const B = UI.bills = { items: [], busy: false, ctl: null, confirm: false };
@@ -120,7 +119,7 @@
     if (!f.mode) f.mode = existingFor(f).length ? 'check' : 'add';
   }
   function errText(code) {
-    return code === 'cancelled' ? 'Reading stopped.' : code === 'not_granted' ? 'Permission to use the model was declined, so this bill was not read. Type the values in.' : code === 'rate_limited' ? 'The hourly AI request limit was reached. Try again later.' : code === 'image_rejected' ? 'The page image was rejected (type or size).' : code === 'invalid_json' ? 'The reply could not be understood. Try again, or type the values in.' : code === 'images_unavailable' ? 'Reading images is not available in this view. Type the values in.' : modelName() + ' did not respond (' + (code || 'error') + '). Type the values in.';
+    return code === 'cancelled' ? 'Reading stopped.' : code === 'not_granted' ? 'Permission to use Claude was declined, so this bill was not read. Type the values in.' : code === 'rate_limited' ? 'Too many requests right now. Try again in a minute.' : code === 'image_rejected' ? 'The page image was rejected (type or size).' : code === 'invalid_json' ? 'The reply could not be understood. Try again, or type the values in.' : code === 'images_unavailable' ? 'Reading images is not available in this view. Type the values in.' : 'Claude did not respond (' + (code || 'error') + '). Type the values in.';
   }
   async function readOne(b) {
     if (!b.images || !b.images.length) { b.error = 'Nothing to read in this file. Type the values in.'; return; }
@@ -200,9 +199,9 @@
   A.billsPanel = function () {
     const avail = CAP.sample && CAP.images;
     const sm = summary();
-    const status = !CAP.checked ? '<div class="note"><span class="spinner"></span> Checking whether an AI model can read bills in this view…</div>'
-      : avail ? '<div class="note ok"><b>' + modelName() + ' can read your bills.</b> Add one or several PDFs or photos, then press <b>Read all bills</b>. It fills in the type, month, quantity and amount; you check each one before saving.</div>'
-        : '<div class="note warn"><b>Automatic reading is not available in this view.</b> Your bills still upload and preview here; type the values from each bill into its form and they go through the same checks.</div>';
+    const status = !CAP.checked ? '<div class="note"><span class="spinner"></span> Checking whether Claude can read bills in this view…</div>'
+      : avail ? '<div class="note ok"><b>Claude reads your bills.</b> Add one or several PDFs or photos, then press <b>Read all bills</b>. Claude fills in the type, month, quantity and amount; you check each one before saving.</div>'
+        : '<div class="note calm">' + ic('info') + '<span><b>Automatic bill reading works in the online version.</b> Here, your bills still upload and preview; type the values from each bill into its form and they go through the same checks.</span></div>';
     const drop = '<div class="drop bill-drop" data-drop="bills">' + ic('files') + '<p style="margin:6px 0 10px"><b>Drop bills here</b> · PDF, JPG, PNG or WebP · several at once</p><div class="row" style="justify-content:center"><label class="btn primary" for="bill-files">' + ic('upload') + 'Choose bills</label><input type="file" id="bill-files" multiple accept=".pdf,application/pdf,image/png,image/jpeg,image/webp,image/gif" data-ch="bill-files" hidden/><button type="button" class="btn" data-act="bill-sample">' + ic('receipt') + 'Add a sample bill</button></div></div>';
     if (!B.items.length) {
       return '<div id="bills-panel" class="stack">' + status + drop +
@@ -231,7 +230,7 @@
       (!saved && CAP.sample && CAP.images && b.images && b.state !== 'reading' && !B.busy ? '<button type="button" class="btn sm ghost" data-act="bills-read" data-arg="' + b.id + '">' + ic('scan-eye') + (b.ai ? 'Read again' : 'Read') + '</button>' : '') +
       (b.state !== 'reading' ? '<button type="button" class="icon-btn sm-x" data-act="bill-del" data-arg="' + b.id + '" aria-label="Remove ' + esc(b.name) + '">' + ic('x') + '</button>' : '') + '</div></div>' +
       (b.error ? '<div class="note err small">' + esc(b.error) + '</div>' : '') +
-      (b.ai && b.ai.issues.length ? '<div class="small muted">AI noted: ' + esc(b.ai.issues.join('; ')) + '</div>' : '') +
+      (b.ai && b.ai.issues.length ? '<div class="small muted">Claude noted: ' + esc(b.ai.issues.join('; ')) + '</div>' : '') +
       '<div class="fields bill-fields">' +
       fld('type', 'Bill for', '<select' + attrs('type') + '><option value="">Choose…</option>' + TYPES.map((t) => '<option value="' + t + '"' + (t === f.type ? ' selected' : '') + '>' + esc(catLabel(t)) + '</option>').join('') + '</select>') +
       fld('month', 'Billing month', '<input type="month"' + attrs('month') + ' value="' + esc(f.month) + '"/>') +
@@ -276,7 +275,7 @@
     const src = b.kind === 'img' ? b.thumb : b.thumb;
     UI.modal = () => '<div class="row between"><h2 style="font-size:16px;overflow-wrap:anywhere">' + esc(b.name) + '</h2><button type="button" class="icon-btn" data-act="close" aria-label="Close">' + ic('x') + '</button></div>' +
       (src ? '<img src="' + src + '" alt="' + esc(b.name) + '" style="width:100%;border-radius:8px;border:1px solid var(--line);background:#fff"/>' : '<div class="chart-empty">No preview for this file.</div>') +
-      (b.kind === 'pdf' && b.pages > 1 ? '<p class="small muted" style="margin:0">Showing page 1 of ' + b.pages + '. The model reads the first two pages.</p>' : '');
+      (b.kind === 'pdf' && b.pages > 1 ? '<p class="small muted" style="margin:0">Showing page 1 of ' + b.pages + '. Claude reads the first two pages.</p>' : '');
     A.renderOverlay();
   };
 
@@ -287,7 +286,7 @@
     B.items.forEach((b) => {
       if (b.state === 'saved') return;
       const v = evaluate(b); if (!v.ok) { if (b.state !== 'loading' && b.state !== 'reading') skipped++; return; }
-      const f = b.f; const by = b.ai && b.ai.isBill ? 'read by AI model, checked by ' + who : 'entered by ' + who;
+      const f = b.f; const by = b.ai && b.ai.isBill ? 'read by Claude, checked by ' + who : 'entered by ' + who;
       if (v.check) {
         audit('Bill checked against records', b.name + ': bill ' + n(v.base) + ' ' + v.unit + ' vs records ' + n(v.exQty) + ' ' + v.unit + ' for ' + catLabel(f.type) + ' ' + f.month + ' (' + (v.p * 100).toFixed(1) + '%; ' + by + ')');
         b.savedMsg = 'Checked: bill ' + n(v.base) + ' ' + v.unit + ' vs records ' + n(v.exQty) + ' ' + v.unit + ' (' + (v.p >= 0 ? '+' : '') + (v.p * 100).toFixed(1) + '%). Logged in the audit trail.';

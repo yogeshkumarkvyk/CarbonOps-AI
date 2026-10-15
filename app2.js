@@ -4,9 +4,8 @@
   const D = G.CO_DATA, E = G.CO_ENGINE, C = G.CO_CHARTS, esc = C.esc;
   const A = G.CarbonOps;
   const { VIEWS, LIVE, ACT, CH, IN, CHART_CLICK, UI, CAP, n, tco2, inr, pct, ic, chip, qchip, ST, area, catLabel, catColor, ph, offerFile, toast, render, refreshLive, renderOverlay, save, audit, go } = A;
+  const aiName = () => G.CarbonOpsCloud && G.CarbonOpsCloud.ready ? 'AI model' : 'Claude';
   const S = () => A.S; const F = () => A.F();
-  const modelName = () => G.CarbonOpsCloud && G.CarbonOpsCloud.ready ? 'AI model' : 'Claude';
-  const cloudAccount = () => { const u = A.auth.current(); return !!(G.CarbonOpsCloud && G.CarbonOpsCloud.ready && u && !u.demo); };
   const canEdit = () => S().settings.user.role !== 'Viewer';
   const denied = () => toast('Your role (Viewer) cannot change data. Switch role in Settings.');
   const head = (vm, title, text, right) => '<div class="page-head"><div><div class="eyebrow">' + esc(vm.meta.short) + '</div><h1>' + title + '</h1>' + (text ? '<p>' + text + '</p>' : '') + '</div>' + (right || '') + '</div>';
@@ -218,8 +217,8 @@
     const cv = UI.cv;
     const avail = CAP.sample && CAP.images;
     const status = !CAP.checked ? '<div class="note"><span class="spinner"></span> Checking whether the vision model is available in this view…</div>'
-      : avail ? '<div class="note ok"><b>Vision model available.</b> Meter photos are sent to the configured ' + modelName() + ' provider. Review its reading before saving.</div>'
-        : '<div class="note warn"><b>Vision model not available in this view.</b> Sign in to use the configured model, or enter the reading by hand below; it goes through the same verification.</div>';
+      : avail ? '<div class="note ok"><b>AI-assisted reading is enabled.</b> Meter photos are sent through CarbonOps AI to its configured hosted provider.</div>'
+        : '<div class="note calm">' + ic('info') + '<span><b>Automatic reading works in the online version.</b> Here, type the reading from the photo below. It goes through the same checks.</span></div>';
     const meters = D.METERS;
     const f = cv.form || cvDefault();
     const m = meters.find((x) => x.id === f.meter) || meters[0];
@@ -279,7 +278,7 @@
       save();
     } catch (e) {
       const code = e && e.code;
-      cv.error = code === 'cancelled' ? 'Reading stopped.' : code === 'not_granted' ? 'Permission to use the model was declined, so the photo was not read. Enter the value by hand.' : code === 'rate_limited' ? 'The hourly AI request limit was reached. Try again later.' : code === 'image_rejected' ? 'The image was rejected (type or size). Try a different photo.' : code === 'invalid_json' ? 'The model reply could not be parsed. Try again or enter the value by hand.' : code === 'images_unavailable' ? 'Image reading is not available in this view. Enter the value by hand.' : 'The vision service did not respond (' + (code || 'error') + '). Enter the value by hand.';
+      cv.error = code === 'cancelled' ? 'Reading stopped.' : code === 'not_granted' ? 'Permission to use Claude was declined, so the photo was not read. Enter the value by hand.' : code === 'rate_limited' ? 'Too many requests right now. Try again in a minute.' : code === 'image_rejected' ? 'The image was rejected (type or size). Try a different photo.' : code === 'invalid_json' ? 'The model reply could not be parsed. Try again or enter the value by hand.' : code === 'images_unavailable' ? 'Image reading is not available in this view. Enter the value by hand.' : 'The vision service did not respond (' + (code || 'error') + '). Enter the value by hand.';
       if (code === 'not_granted' || code === 'images_unavailable') CAP.images = false;
     }
     cv.busy = false; cv.ctl = null; render();
@@ -691,7 +690,7 @@
     const s = q.toLowerCase(); const a = vm.agg; const b = vm.aggCmp; const recs = vm.recs.filter((r) => r.status !== 'Rejected');
     const t = (kg) => n(kg / 1000, 1) + ' t';
     const tail = '\n\n_Rule-based demo answer. Figures come directly from the calculation engine; no language model was used._';
-    if (/largest|biggest|main|top/.test(s) && /source|emission/.test(s)) {
+    if ((/largest|biggest|main|top|most|highest/.test(s) && /source|emission|energy|electric|carbon|co2|pollut|use|wast/.test(s)) || /wast(e|ing)/.test(s)) {
       const top = Object.values(a.bySource).sort((x, y) => y.kg - x.kg).slice(0, 5);
       return 'Largest sources in ' + vm.period.label + ' (total ' + t(a.total) + '):\n' + top.map((x) => '- **' + area(x.area).name + ', ' + catLabel(x.category) + '**: ' + t(x.kg) + ' (' + ((x.kg / a.total) * 100).toFixed(1) + '%), data: ' + Object.keys(x.statuses).join(', ')).join('\n') + '\n\nPurchased steel uses an illustrative factor, so its size is indicative. Scope 1 + 2 is ' + t(a.s1 + a.s2) + ', led by grid electricity.' + tail;
     }
@@ -745,8 +744,27 @@
     close(); return html;
   }
   const SHORT_Q = [['Biggest sources?', QUESTIONS[0]], ['Why did it go up?', QUESTIONS[1]], ['What to do first?', QUESTIONS[2]], ['Cheap wins?', QUESTIONS[3]], ['Best payback?', QUESTIONS[4]], ['What data is missing?', QUESTIONS[6]]];
+  // Full-page welcome: a factory snapshot plus large starter questions.
+  function welcomeHTML() {
+    const vm = A.VM; if (!vm) return '';
+    const a = vm.agg || {}; const b = vm.aggCmp; const hasData = a.total > 0;
+    const topCat = Object.entries(a.byCat || {}).sort((x, y) => y[1] - x[1])[0];
+    const topArea = Object.entries(a.byArea || {}).sort((x, y) => y[1] - x[1])[0];
+    const chg = b && b.total ? a.total / b.total - 1 : null;
+    const snap = hasData ? '<div class="aiw-snap">' +
+      '<div><span>Total emissions</span><b data-count="' + Math.round(a.total / 1000) + '">' + tco2(a.total) + ' t</b><small>' + esc(vm.period.label) + '</small></div>' +
+      (topCat ? '<div><span>Biggest source</span><b>' + esc(catLabel(topCat[0])) + '</b><small>' + tco2(topCat[1]) + ' t · ' + Math.round(topCat[1] / a.total * 100) + '% of total</small></div>' : '') +
+      (topArea ? '<div><span>Hotspot area</span><b>' + esc(area(topArea[0]).name) + '</b><small>' + tco2(topArea[1]) + ' t</small></div>' : '') +
+      (chg != null ? '<div><span>Change</span><b class="' + (chg > 0 ? 'bad-t' : 'good-t') + '">' + (chg > 0 ? '▲ ' : '▼ ') + Math.abs(chg * 100).toFixed(1) + '%</b><small>vs ' + (S().compare === 'yoy' ? 'last year' : 'previous period') + '</small></div>' : '') +
+      '</div>' : '<div class="aiw-snap empty"><div><span>No data yet</span><b>Add a few records first</b><small>Then ask about your own factory</small></div></div>';
+    const cards = [['flame', 'Where am I wasting the most energy?', 'The biggest sources and why', 'Where am I wasting the most energy?'], ['trending-up', 'Why did emissions go up?', 'What changed against the comparison period', QUESTIONS[1]], ['list-checks', 'What should we fix first?', 'Three actions to investigate', QUESTIONS[2]], ['piggy-bank', 'Which fix pays back fastest?', 'Best payback in the planner', QUESTIONS[4]]];
+    return '<div class="aiw"><div class="aiw-h"><div class="ai-orb" aria-hidden="true">' + ic('sparkles') + '</div><div><h2>Ask your factory anything</h2><p>Type a question or tap the mic. Answers use this factory\'s own calculated numbers.</p></div></div>' + snap +
+      '<div class="aiw-qs">' + cards.map(([icn, t, d, q], i) => '<button type="button" class="aiw-q" style="--i:' + i + '" data-act="ad-ask" data-arg="' + esc(q) + '"><span class="aiw-ic">' + ic(icn) + '</span><b>' + t + '</b><small>' + d + '</small><span class="aiw-go">' + ic('arrow-up-right') + '</span></button>').join('') + '</div>' +
+      '<div class="ai-chips aiw-more">' + SHORT_Q.slice(3).map(([l, q]) => '<button type="button" data-act="ad-ask" data-arg="' + esc(q) + '">' + esc(l) + '</button>').join('') + '</div></div>';
+  }
   function chatHTML(where) {
     const ad = UI.advisor; const turns = ad.turns;
+    if (!turns.length && where === 'page') return welcomeHTML();
     if (!turns.length) {
       return '<div class="ai-empty"><div class="ai-orb" aria-hidden="true">' + ic('sparkles') + '</div><p>Ask anything about this factory\'s emissions. Answers use the platform\'s own numbers.</p><div class="ai-chips">' + SHORT_Q.map(([l, q]) => '<button type="button" data-act="ad-ask" data-arg="' + esc(q) + '">' + esc(l) + '</button>').join('') + '</div></div>';
     }
@@ -754,18 +772,47 @@
   }
   function modeLine() {
     const ad = UI.advisor; const llm = !!CAP.sample && ad.mode !== 'rules';
-    if (!CAP.checked) return '<span class="ai-mode">Checking model availability…</span>';
-    if (!CAP.sample) return '<span class="ai-mode">Rule-based answers · sign in to use the hosted AI model</span>';
-    return '<span class="ai-mode">' + (llm ? 'Answered by ' + modelName() : 'Rule-based answers') + ' · <button type="button" data-act="ad-mode" data-arg="' + (llm ? 'rules' : 'llm') + '">switch to ' + (llm ? 'rule-based' : modelName()) + '</button></span>';
+    if (!CAP.checked) return '<span class="ai-mode">Checking for ' + aiName() + '…</span>';
+    if (!CAP.sample) return '<span class="ai-mode">Rule-based answers · no AI model in this view</span>';
+    return '<span class="ai-mode">' + (llm ? 'Answered by ' + aiName() : 'Rule-based answers') + ' · <button type="button" data-act="ad-mode" data-arg="' + (llm ? 'rules' : 'llm') + '">switch to ' + (llm ? 'rule-based' : aiName()) + '</button></span>';
   }
   function composer(id) {
     const ad = UI.advisor;
-    return '<div class="ai-compose"><textarea id="' + id + '" rows="1" aria-label="Question for the advisor" placeholder="Ask a question…" data-in="ad-draft">' + esc(ad.draft) + '</textarea>' +
+    const rec = MIC.on && MIC.target === id;
+    return '<div class="ai-compose' + (rec ? ' rec' : '') + '"><textarea id="' + id + '" rows="1" aria-label="Question for the advisor" placeholder="' + (rec ? 'Listening… speak your question' : 'Ask a question, or tap the mic and speak…') + '" data-in="ad-draft">' + esc(ad.draft) + '</textarea>' +
+      '<button type="button" class="ai-mic' + (rec ? ' on' : '') + '" data-act="ad-mic" data-arg="' + id + '" aria-pressed="' + rec + '" aria-label="' + (rec ? 'Stop listening' : 'Ask by voice') + '" title="' + (rec ? 'Stop listening' : 'Ask by voice') + '">' + ic(rec ? 'mic-off' : 'mic') + '</button>' +
       (ad.busy ? '<button type="button" class="ai-send" data-act="ad-stop" aria-label="Stop">' + ic('square') + '</button>' : '<button type="button" class="ai-send" data-act="ad-send" aria-label="Send">' + ic('arrow-up') + '</button>') + '</div>';
   }
+  // ---- voice input (Web Speech API; Chrome sends the audio to its speech service) ----
+  const MIC = { on: false, target: null, rec: null, text: '' };
+  function micStop() { if (MIC.rec) { try { MIC.rec.stop(); } catch (e) { /* ignore */ } } }
+  ACT['ad-mic'] = (id) => {
+    if (MIC.on) { micStop(); return; }
+    const SR = G.SpeechRecognition || G.webkitSpeechRecognition;
+    if (!SR) { toast('Voice input needs Google Chrome. Open the website in Chrome to use the microphone.'); return; }
+    const r = new SR(); r.lang = 'en-IN'; r.interimResults = true; r.continuous = false; r.maxAlternatives = 1;
+    MIC.on = true; MIC.target = id || 'ad-in'; MIC.rec = r; MIC.text = ''; MIC.err = null;
+    const base = (UI.advisor.draft || '').trim();
+    r.onresult = (e) => {
+      let fin = '', mid = '';
+      for (let i = 0; i < e.results.length; i++) { const t = e.results[i][0].transcript; if (e.results[i].isFinal) fin += t; else mid += t; }
+      MIC.text = (fin || mid).trim(); UI.advisor.draft = (base ? base + ' ' : '') + MIC.text;
+      const ta = document.getElementById(MIC.target); if (ta) { ta.value = UI.advisor.draft; ta.style.height = 'auto'; ta.style.height = Math.min(120, ta.scrollHeight) + 'px'; }
+    };
+    r.onerror = (e) => { MIC.err = e.error; };
+    r.onend = () => {
+      const said = MIC.text, err = MIC.err; MIC.on = false; MIC.rec = null; refreshChats();
+      if (err === 'not-allowed' || err === 'service-not-allowed') { toast('Microphone access is blocked here. Allow the microphone for this page in Chrome, or open the website from the CarbonOps-AI-website folder.'); return; }
+      if (err === 'audio-capture') { toast('No microphone was found.'); return; }
+      if (err === 'network') { toast('Voice input needs an internet connection.'); return; }
+      if (said) ask(); else if (!err || err === 'no-speech') toast('Didn\'t catch that. Tap the mic and try again.');
+    };
+    try { r.start(); } catch (e) { MIC.on = false; MIC.rec = null; toast('Could not start the microphone.'); return; }
+    refreshChats(); const ta = document.getElementById(MIC.target); if (ta) ta.focus();
+  };
   VIEWS.advisor = (vm) => {
     const ad = UI.advisor;
-    return '<div class="ai-page"><div class="ai-head"><div><h1>AI Advisor</h1><p class="small muted" style="margin:2px 0 0">Plain-language answers about ' + esc(vm.meta.short) + ', ' + esc(vm.period.label) + '.</p></div><div class="row" style="gap:6px">' + (ad.turns.length ? '<button type="button" class="btn sm ghost" data-act="ad-clear">New chat</button>' : '') + '<button type="button" class="btn sm ghost" data-act="ad-sees">' + ic('eye') + 'What it sees</button></div></div>' +
+    return '<div class="ai-page ai-full"><div class="ai-head"><div><h1>' + ic('sparkles') + 'AI Advisor</h1><p class="small muted" style="margin:2px 0 0">Plain-language answers about ' + esc(vm.meta.short) + ', ' + esc(vm.period.label) + '.</p></div><div class="row" style="gap:6px">' + (ad.turns.length ? '<button type="button" class="btn sm ghost" data-act="ad-clear">New chat</button>' : '') + '<button type="button" class="btn sm ghost" data-act="ad-sees">' + ic('eye') + 'What it sees</button></div></div>' +
       '<div class="ai-card"><div class="ai-chat" data-chat="page" aria-live="polite">' + chatHTML('page') + '</div>' + composer('ad-in') + '<div class="ai-foot">' + modeLine() + '</div></div></div>';
   };
   function renderMini() {
@@ -801,7 +848,7 @@
     ad.turns.push({ role: 'user', content: q });
     const useLLM = !!CAP.sample && ad.mode !== 'rules';
     if (!useLLM) { ad.turns.push({ role: 'assistant', content: ruleAnswer(q, vm), meta: 'Rule-based · ' + vm.period.label }); refreshChats(); return; }
-    const idx = ad.turns.length; ad.turns.push({ role: 'assistant', content: '', meta: (G.CarbonOpsCloud && G.CarbonOpsCloud.ready ? 'AI model' : 'Claude') + ' · from this factory\'s data, ' + vm.period.label });
+    const idx = ad.turns.length; ad.turns.push({ role: 'assistant', content: '', meta: aiName() + ' · from this factory\'s data, ' + vm.period.label });
     ad.busy = true; ad.ctl = new AbortController(); refreshChats();
     const history = ad.turns.slice(0, -1).slice(-8).map((t) => ({ role: t.role, content: t.content || '(no answer)' }));
     const input = [{ role: 'user', content: RULES + '\n\nDATA SNAPSHOT:\n' + JSON.stringify(snapshot(vm)) }].concat(history);
@@ -811,7 +858,7 @@
     } catch (e) {
       const code = e && e.code; const fallback = code === 'not_granted' || code === 'sampling_disabled';
       ad.turns[idx].content = (e && e.text ? e.text + '\n\n' : '') + (code === 'cancelled' ? '_Stopped._' : fallback ? ruleAnswer(q, vm) : '_The advisor could not answer (' + (code || 'error') + '). ' + (code === 'rate_limited' ? 'Too many requests; try again shortly.' : 'Try again, or switch to rule-based.') + '_');
-      if (fallback) { ad.turns[idx].meta = 'Rule-based (model permission not granted)'; CAP.sample = null; }
+      if (fallback) { ad.turns[idx].meta = 'Rule-based (Claude permission not granted)'; CAP.sample = null; }
     }
     ad.busy = false; ad.ctl = null; refreshChats();
   }
@@ -840,11 +887,37 @@
     return '<!doctype html><html><head><meta charset="utf-8"><title>CarbonOps report ' + esc(vm.period.label) + '</title><style>body{font:13px/1.5 Arial,sans-serif;color:#13201c;max-width:900px;margin:32px auto;padding:0 20px}h2{font-size:20px;margin:4px 0}h3{font-size:14px;margin:22px 0 8px;border-top:1px solid #ddd;padding-top:12px}table{border-collapse:collapse;width:100%;font-size:12px}th,td{border-bottom:1px solid #e3e3e3;padding:5px 6px;text-align:left;vertical-align:top}th{color:#555;font-size:11px;text-transform:uppercase}.n{text-align:right}.small{font-size:12px}.muted{color:#666}.eyebrow{font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#666}@media print{body{margin:0}}</style></head><body>' + body + '</body></html>';
   }
   const QL = (q) => ({ documented: 'Documented', derived: 'Derived from defaults', illustrative: 'Illustrative', missing: 'Missing' })[q] || q;
+  // Share of emissions (by tonnes) backed by measured or imported records vs estimates, for the selected period.
+  A.dataQuality = (vm) => {
+    const ms = new Set(vm.months); let good = 0, est = 0, sim = 0;
+    vm.f.records.forEach((r) => {
+      if (!ms.has(r.month) || !r.calc || r.calc.kg == null || !E.inBoundary(r, S().settings)) return;
+      const kg = r.calc.kg; if (r.status === 'simulated') sim += kg; else if (r.status === 'estimated') est += kg; else good += kg;
+    });
+    const tot = good + est + sim; if (!tot) return null;
+    const goodPct = Math.round(good / tot * 100), simPct = Math.round(sim / tot * 100);
+    return { goodPct, estPct: Math.max(0, 100 - goodPct - simPct), simPct };
+  };
+  // At-a-glance strip above the printable report: total, scope split, top sources and the monthly trend.
+  function reportSummary(vm) {
+    const a = vm.agg; if (!a || !(a.total > 0)) return '';
+    const sc = [[1, 'Fuel on site', 'var(--s1)'], [2, 'Electricity', 'var(--s2)'], [3, 'Supply chain', 'var(--s3)']];
+    const top = Object.values(a.bySource || {}).sort((x, y) => y.kg - x.kg).slice(0, 3);
+    const months = vm.months.filter((m) => a.byMonth[m] && a.byMonth[m].total > 0);
+    const q = A.dataQuality ? A.dataQuality(vm) : null;
+    return '<div class="rep-sum st">' +
+      '<div class="rep-tile rep-total"><span>Total emissions</span><b data-count="' + Math.round(a.total / 1000) + '">' + tco2(a.total) + '</b><small>t CO₂e · ' + esc(vm.period.label) + '</small>' +
+      '<div class="rep-split">' + sc.map(([k, , c]) => '<i style="flex:' + Math.max(0.001, a['s' + k]) + ';background:' + c + '"></i>').join('') + '</div>' +
+      '<div class="rep-leg">' + sc.map(([k, l, c]) => '<span><i style="background:' + c + '"></i>' + l + ' ' + Math.round(a['s' + k] / a.total * 100) + '%</span>').join('') + '</div></div>' +
+      '<div class="rep-tile"><span>Top 3 sources</span><ol class="rep-top">' + top.map((x) => '<li><span>' + esc(catLabel(x.category)) + ' <em>— ' + esc(area(x.area).name) + '</em></span><b>' + tco2(x.kg) + ' t</b><i style="width:' + (x.kg / top[0].kg * 100) + '%"></i></li>').join('') + '</ol></div>' +
+      '<div class="rep-tile rep-chart"><span>Month by month</span>' + ph((el) => C.bars(el, { labels: months.map((m) => D.monthLabel(m)), height: 150, unit: 't CO2e', tipFmt: (v) => n(v, 0) + ' t', series: [{ name: 'Emissions', color: 'var(--c3)', values: months.map((m) => a.byMonth[m].total / 1000) }] })) +
+      (q ? '<div class="rep-q"><b>' + q.goodPct + '%</b> of emissions from measured or imported data · ' + q.estPct + '% estimated</div>' : '') + '</div></div>';
+  }
   VIEWS.reports = (vm) => {
     const t = UI.reports.tab;
     const tabs = [['report', 'Report'], ['verification', 'Estimated vs verified'], ['audit', 'Audit trail']];
     let body = '';
-    if (t === 'report') body = '<div class="report">' + reportHTML(vm, false) + '</div>';
+    if (t === 'report') body = reportSummary(vm) + '<div class="report">' + reportHTML(vm, false) + '</div>';
     if (t === 'verification') {
       const rs = vm.recs.filter((r) => r.est.kg != null && r.status !== 'Rejected');
       body = '<div class="card"><div class="card-b">' + ph((el) => C.bars(el, { labels: rs.map((r) => r.title.length > 26 ? r.title.slice(0, 25) + '…' : r.title), rotate: true, height: 260, unit: 't CO2e/yr', tipFmt: (v) => n(v, 1) + ' t', series: [{ name: 'Estimated', color: 'var(--c6)', hatch: true, values: rs.map((r) => r.est.kg / 1000) }, { name: 'Verified (measured)', color: 'var(--emerald)', values: rs.map((r) => (r.verification ? r.verification.kg / 1000 : 0)) }] })) +
@@ -880,10 +953,10 @@
     if (tab === 'help') {
       const step = (n, t, d) => '<li><span class="ht-n">' + n + '</span><div><b>' + t + '</b><p>' + d + '</p></div></li>';
       body = '<section class="card ht-card"><div class="ht-video"><video controls preload="metadata" playsinline aria-label="CarbonOps AI tutorial video"><source src="tutorial.webm" type="video/webm"/><source src="tutorial.mp4" type="video/mp4"/><a href="tutorial.mp4">Download the tutorial video</a></video></div>' +
-        '<div class="card-b"><h3 class="ht-h">How to use CarbonOps AI in six steps</h3><p class="small muted" style="margin:2px 0 12px">The video above shows each step. It has no sound; the captions explain what is happening.</p><ol class="ht-steps">' +
+        '<div class="card-b"><h3 class="ht-h">How to use CarbonOps AI in six steps</h3><p class="small muted" style="margin:2px 0 12px">The video above shows each step, with a voice-over and captions. Turn your sound on.</p><ol class="ht-steps">' +
         step(1, 'Create an account', 'Every new account starts empty. Use “Explore the demo workspace” to look at a finished sample factory instead.') +
         step(2, 'Name your factory', 'On the Overview, type the factory name, location and what you make, then Save.') +
-        step(3, 'Upload your floor plan', modelName() + ' can read room labels and build the 3D twin from them. You can also type a room name and drag a box around it.') +
+        step(3, 'Upload your floor plan', 'The hosted AI model can read room names on the plan and build the 3D twin from them. You can also type a room name and drag a box around it.') +
         step(4, 'Add your data', 'Use Add data at the top for one line at a time, Upload for bills, Excel or photos, or Add sample data to fill two months for every room.') +
         step(5, 'Read the Overview and the 3D twin', 'See the total, each room, and each source. Click a room to see its details.') +
         step(6, 'Find where to act', 'Reduction Planner shows what went up, what went down and where a cut counts most. Scenario Simulator lets you try cuts with sliders.') +
@@ -904,7 +977,7 @@
           '<div class="tbl-wrap"><table><thead><tr><th>Factor</th><th>Value</th><th>Quality</th><th>Source</th><th>Version</th><th></th></tr></thead><tbody>' +
           Object.keys(reg).map((k) => { const f = E.factor(reg, k); return '<tr><td><b>' + esc(f.name) + '</b><div class="small muted">Scope ' + f.scope + ' · per ' + esc(f.activityUnit) + '</div></td><td class="mono">' + (f.value == null ? '<span class="chip st-missing">not set</span>' : esc(f.value) + ' <span class="small muted">' + esc(f.unit) + '</span>') + '</td><td>' + qchip(f.quality) + '</td><td class="small">' + esc(f.source) + (f.year ? ' (' + f.year + ')' : '') + (f.note ? '<br><span style="color:var(--amber)">' + esc(f.note) + '</span>' : '') + '</td><td class="mono">v' + f.latest + '</td><td><button type="button" class="btn sm" data-act="st-factor" data-arg="' + k + '">' + ic('plus') + 'New version</button></td></tr>'; }).join('') + '</tbody></table></div>',
           (stale ? '<span class="chip st-review">' + stale + ' records on an older version</span>' : '<span class="chip st-calculated">All records current</span>') + '<button type="button" class="btn sm' + (stale ? ' primary' : '') + '" data-act="st-recalc">' + ic('refresh-cw') + 'Recalculate</button>') +
-        sec('database', 'Workspace data', cloudAccount() ? 'Changes sync to your private account workspace.' : 'Everything you change is kept in this browser only.', '<div class="stack"><div class="row"><button type="button" class="btn danger" data-act="ws-fresh">' + ic('eraser') + 'Start with an empty workspace</button><span class="small muted">Removes all data so you can add your own factory from scratch.</span></div><div class="row"><button type="button" class="btn" data-act="st-reset">' + ic('database') + (A.F().blank ? 'Load the sample factory' : 'Reset demo data') + '</button><span class="small muted">Replaces everything with the fictional sample dataset (two factories).</span></div></div>');
+        sec('database', 'Workspace data', G.CarbonOpsCloud && G.CarbonOpsCloud.ready && A.auth.current() && !A.auth.current().demo ? 'Changes sync to your private Supabase workspace.' : 'Everything you change in the demo is kept in this browser.', '<div class="stack"><div class="row"><button type="button" class="btn danger" data-act="ws-fresh">' + ic('eraser') + 'Start with an empty workspace</button><span class="small muted">Removes all data so you can add your own factory from scratch.</span></div><div class="row"><button type="button" class="btn" data-act="st-reset">' + ic('database') + (A.F().blank ? 'Load the sample factory' : 'Reset demo data') + '</button><span class="small muted">Replaces everything with the fictional sample dataset (two factories).</span></div></div>');
     } else {
       const initials = (u.name || 'U').split(/\s+/).map((w) => w[0]).join('').slice(0, 2).toUpperCase();
       const can = { 'Plant admin': ['Import and correct data', 'Change emission factors and prices', 'Approve and verify measures', 'Reset demo data'], 'Sustainability officer': ['Import and correct data', 'Change emission factors and prices', 'Approve and verify measures'], Viewer: ['View every page and report', 'Use the simulator and AI Advisor', 'Cannot change data, factors or statuses'] }[u.role] || [];
@@ -918,7 +991,7 @@
             ? '<div class="note small">You are using the shared demo account, which has no password. Create your own account from the sign-in page to set one.</div>'
             : '<form class="stack" data-form="pw" onsubmit="return false" novalidate><div class="fields">' + inp('st-pw-cur', 'Current password', '', 'password', ' autocomplete="current-password"') + inp('st-pw-new', 'New password', '', 'password', ' autocomplete="new-password" minlength="8"') + inp('st-pw-new2', 'Confirm new password', '', 'password', ' autocomplete="new-password"') + '</div><div class="row"><button type="button" class="btn primary" data-act="acct-pw">' + ic('key-round') + 'Change password</button><span id="st-pw-msg" class="small"></span></div></form>') +
           '<div class="row" style="border-top:1px solid var(--line-2);padding-top:12px"><button type="button" class="btn" data-act="pm-signout">' + ic('log-out') + 'Sign out</button><button type="button" class="btn ghost danger" data-act="acct-delete">' + ic('trash-2') + (A.auth.current() && A.auth.current().demo ? 'Clear demo workspace' : 'Delete account') + '</button></div>' +
-          '<p class="small muted" style="margin:0">' + (cloudAccount() ? 'Your workspace is stored in Supabase. Your password is handled by Supabase Auth.' : 'Accounts are kept in this browser only. Passwords are salted and hashed; they are never stored as text.') + '</p>') +
+          '<p class="small muted" style="margin:0">' + (G.CarbonOpsCloud && G.CarbonOpsCloud.ready ? 'Your account and workspace are stored in the connected Supabase project.' : 'Accounts are kept in this browser only. Passwords are salted and hashed; they are never stored as text.') + '</p>') +
         sec('palette', 'Appearance', 'Theme and how numbers are shown.',
           '<div class="field"><span class="lab">Theme</span><div class="seg" role="group" aria-label="Theme"><button type="button" class="' + (A.theme() === 'dark' ? 'on' : '') + '" data-act="theme-set" data-arg="dark">' + ic('moon') + ' Dark</button><button type="button" class="' + (A.theme() === 'light' ? 'on' : '') + '" data-act="theme-set" data-arg="light">' + ic('sun') + ' Light</button></div></div>' +
           '<div class="field"><label for="st-cmp">Compare periods with</label><select id="st-cmp" data-ch="compare"><option value="yoy"' + (S().compare === 'yoy' ? ' selected' : '') + '>Same period last year</option><option value="prev"' + (S().compare === 'prev' ? ' selected' : '') + '>Previous period</option></select></div>' +
@@ -940,7 +1013,7 @@
   };
   ACT['acct-delete'] = () => {
     const demo = A.auth.current() && A.auth.current().demo;
-    UI.modal = () => '<h2 style="font-size:17px">' + (demo ? 'Clear the demo workspace?' : 'Delete your account?') + '</h2><p style="margin:0">' + (demo ? 'Your changes to the demo workspace are removed and you are signed out.' : G.CarbonOpsCloud && G.CarbonOpsCloud.ready ? 'Your account and its cloud workspace, including floor-plan assets, will be deleted. This cannot be undone.' : 'Your account and its workspace are removed from this browser. This cannot be undone.') + '</p><div class="row"><button type="button" class="btn danger" data-act="acct-delete-ok">' + (demo ? 'Clear and sign out' : 'Delete account') + '</button><button type="button" class="btn" data-act="close">Cancel</button></div>';
+    UI.modal = () => '<h2 style="font-size:17px">' + (demo ? 'Clear the demo workspace?' : 'Delete your account?') + '</h2><p style="margin:0">' + (demo ? 'Your changes to the demo workspace are removed and you are signed out.' : 'Your account and its workspace (imports, scenarios, floor plan, statuses) are removed from this browser. This cannot be undone.') + '</p><div class="row"><button type="button" class="btn danger" data-act="acct-delete-ok">' + (demo ? 'Clear and sign out' : 'Delete account') + '</button><button type="button" class="btn" data-act="close">Cancel</button></div>';
     renderOverlay();
   };
   ACT['acct-delete-ok'] = () => { UI.modal = null; renderOverlay(); A.auth.deleteAccount(); };
@@ -984,7 +1057,7 @@
     audit('Emission factor version added', f.name + ': v' + (last.v + 1) + ' = ' + v + ' ' + f.unit + ' (' + src + ')');
     save(); UI.modal = null; renderOverlay(); render(); toast('Factor v' + (last.v + 1) + ' added. Recalculate to apply it.');
   };
-  ACT['st-user'] = async () => { const em = val('st-email').trim(); const msg = document.getElementById('st-user-msg'); if (em && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) { msg.style.color = 'var(--red)'; msg.textContent = 'Enter a valid email, like name@company.com.'; return; } const nu = { name: val('st-user').trim() || 'Demo user', role: val('st-role'), email: em.toLowerCase(), username: val('st-uname').trim() }; const er = await A.auth.updateProfile(nu); if (er) { msg.style.color = 'var(--red)'; msg.textContent = er; return; } S().settings.user = nu; audit('Profile updated', S().settings.user.name + ' · ' + S().settings.user.role); save(); render(); toast('Profile saved'); };
+  ACT['st-user'] = () => { const em = val('st-email').trim(); const msg = document.getElementById('st-user-msg'); if (em && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(em)) { msg.style.color = 'var(--red)'; msg.textContent = 'Enter a valid email, like name@company.com.'; return; } const nu = { name: val('st-user').trim() || 'Demo user', role: val('st-role'), email: em.toLowerCase(), username: val('st-uname').trim() }; const er = A.auth.updateProfile(nu); if (er) { msg.style.color = 'var(--red)'; msg.textContent = er; return; } S().settings.user = nu; audit('Profile updated', S().settings.user.name + ' · ' + S().settings.user.role); save(); render(); toast('Profile saved'); };
   ACT['st-reset'] = () => {
     UI.modal = () => '<h2 style="font-size:17px">Reset all demo data?</h2><p style="margin:0">Imports, corrections, factor versions, statuses, scenarios and the audit trail in this browser will be replaced by the original fictional dataset.</p><div class="row"><button type="button" class="btn danger" data-act="st-reset-ok">Reset</button><button type="button" class="btn" data-act="close">Cancel</button></div>';
     renderOverlay();

@@ -14,7 +14,29 @@
         versions: [{ v: 1, value: f.value, kgPer: f.kgPer, source: f.source, year: f.year, validity: f.validity, quality: f.quality, note: f.note, at: '2026-04-01', by: 'System seed' }]
       };
     });
+    addGridUpdate(reg);
     return reg;
+  }
+  // Grid factor for the current year, supplied by the team (0.82 t CO2/MWh). Added as a new version so the
+  // earlier CEA FY 2023-24 value (0.727) stays in the history and past results remain traceable.
+  const GRID_UPDATE = { tag: 'grid-2026', value: 0.82, kgPer: 0.82, year: 2026, validity: 'Current year (2026)', quality: 'documented',
+    source: 'Current-year all-India grid emission factor provided by the CarbonOps team (0.82 t CO2/MWh)',
+    note: 'Confirm against the latest CEA CO2 Baseline Database (User Guide v22.0, Sep 2026) before an audited report.', at: '2026-10-15', by: 'CarbonOps update' };
+  function addGridUpdate(reg) {
+    const f = reg && reg['grid-in'];
+    if (!f || f.versions.some((v) => v.tag === GRID_UPDATE.tag)) return false;
+    f.versions.push(Object.assign({ v: f.versions[f.versions.length - 1].v + 1 }, GRID_UPDATE));
+    return true;
+  }
+  // Bring a saved workspace onto the current grid factor and recalculate every electricity record once.
+  function migrateGrid(state) {
+    if (!state || !state.reg || !addGridUpdate(state.reg)) return 0;
+    let c = 0;
+    Object.values(state.factories || {}).forEach((fac) => (fac.records || []).forEach((r) => {
+      if (r.calc && r.calc.factorId === 'grid-in') { r.calc = calcRecord(r, state.reg); c++; }
+    }));
+    Object.values(state.factories || {}).forEach((fac) => { if (fac.audit) fac.audit.unshift({ at: nowStamp(), user: 'System', action: 'Emission factor updated', detail: 'Grid electricity changed from 0.727 to 0.82 t CO2/MWh (current year). ' + c + ' electricity records recalculated.' }); });
+    return c;
   }
   function factor(reg, id) {
     const f = reg[id];
@@ -764,7 +786,7 @@
   function areaName(id) { const al = D.AREA_ALIAS || {}; const a = AREAS.find((x) => x.id === (al[id] || id)); return a ? a.name : id; }
 
   G.CO_ENGINE = {
-    buildRegistry, factor, kgPerFromValue, toBase, calcRecord, recordScope, inBoundary, recordCost, periodsFor, fyLabel, aggregate, detectGaps,
+    buildRegistry, migrateGrid, factor, kgPerFromValue, toBase, calcRecord, recordScope, inBoundary, recordCost, periodsFor, fyLabel, aggregate, detectGaps,
     parseCSV, toCSV, IMPORT_FIELDS, autoMap, parseMonth, validateImport, makeCtx, RECS, STATUSES, PRIOR, evaluateRecs, rankRecs, verifyRec,
     defaultParams, baselineItems, runScenario, buildAlerts, areaName, PROD_LINK, BASE_HOURS, nowStamp, fmtN
   };

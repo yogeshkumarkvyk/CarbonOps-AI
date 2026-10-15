@@ -48,7 +48,7 @@
         meta: { name: 'My factory', short: 'My factory', location: '', industry: '', productionUnit: 'units' } } } };
   }
   function load(acc) {
-    try { const raw = localStorage.getItem(STORE); if (raw) { const s = JSON.parse(raw); if (s && s.v === 1 && s.factories) return s; } } catch (e) { /* storage unavailable */ }
+    try { const raw = localStorage.getItem(STORE); if (raw) { const s = JSON.parse(raw); if (s && s.v === 1 && s.factories) { if (E.migrateGrid(s)) { try { localStorage.setItem(STORE, JSON.stringify(s)); } catch (e2) { /* ignore */ } } return s; } } } catch (e) { /* storage unavailable */ }
     return acc && acc.id === 'demo' ? seedState() : blankState();
   }
   let saveTimer = null;
@@ -56,7 +56,7 @@
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
       try { if (S) localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) { /* ignore */ }
-      const user = G.CarbonOpsCloud && G.CarbonOpsCloud.client && G.CarbonOps.auth.current();
+      const user = G.CarbonOpsCloud && G.CarbonOpsCloud.ready && G.CarbonOps.auth.current();
       if (S && user && !user.demo) G.CarbonOpsCloud.saveWorkspace(user.id, S).catch((e) => console.error('CarbonOps cloud save failed:', e.message));
     }, 400);
   }
@@ -143,7 +143,7 @@
     ['Monitor', [['overview', 'Overview', 'layout-dashboard'], ['twin', 'Factory Digital Twin', 'box'], ['explorer', 'Emissions Explorer', 'search']]],
     ['Data', [['data', 'Data Centre', 'database'], ['vision', 'Computer Vision', 'scan-eye']]],
     ['Decide', [['planner', 'Reduction Planner', 'lightbulb'], ['simulator', 'Scenario Simulator', 'sliders-horizontal'], ['advisor', 'AI Advisor', 'bot']]],
-    ['Assure', [['reports', 'Reports and Verification', 'file-check'], ['settings', 'Settings', 'settings']]]
+    ['Assure', [['reports', 'Reports and Verification', 'file-check'], ['method', 'How we calculate', 'calculator'], ['settings', 'Settings', 'settings']]]
   ];
   function renderNav(vm) {
     const open = vm.recs.filter((r) => r.status === 'Suggested').length;
@@ -160,14 +160,16 @@
       '<div class="sel hide-md"><label for="sel-cmp">Compare with</label><select id="sel-cmp" data-ch="compare"><option value="yoy"' + (S.compare === 'yoy' ? ' selected' : '') + '>Same period last year</option><option value="prev"' + (S.compare === 'prev' ? ' selected' : '') + '>Previous period</option></select></div>' +
       '<div class="data-status hide-sm" title="Data status for the selected factory"><span class="dot' + (q ? '' : ' ok') + '"></span><span>Data to ' + esc(D.monthLabel(vm.months[vm.months.length - 1], true)) + ' · ' + (q ? q + ' issue' + (q > 1 ? 's' : '') : 'no issues') + '</span></div>' +
       '<div class="grow"></div>' +
-      '<button type="button" class="icon-btn theme-btn up-btn add-btn" data-act="qa-open" title="Add a reading, bill or delivery by hand">' + ic('plus') + '<span>Add data</span></button>' +
-      '<button type="button" class="icon-btn theme-btn up-btn" data-act="top-upload-open" title="Upload bills, photos, CSV or Excel files">' + ic('upload') + '<span>Upload</span></button><input type="file" id="top-upload" multiple accept=".csv,.xlsx,.xls,.ods,.pdf,image/png,image/jpeg,image/webp,image/gif" data-ch="top-upload" hidden/>' +
-      '<button type="button" class="icon-btn theme-btn" data-act="theme" aria-label="Switch to ' + (theme() === 'dark' ? 'light' : 'dark') + ' theme" title="Switch to ' + (theme() === 'dark' ? 'light' : 'dark') + ' theme">' + ic(theme() === 'dark' ? 'sun' : 'moon') + '<span>' + (theme() === 'dark' ? 'Light' : 'Dark') + '</span></button>' +
+      '<div class="rel"><button type="button" class="icon-btn theme-btn up-btn add-btn" data-act="add-menu" aria-haspopup="menu" aria-expanded="' + !!UI.addOpen + '" title="Add data: type a reading or upload files">' + ic('plus') + '<span>Add data</span>' + ic('chevron-down', 'add-cv') + '</button>' +
+      (UI.addOpen ? '<div class="notif add-menu" role="menu"><button type="button" role="menuitem" data-act="add-pick" data-arg="type">' + ic('pencil-line') + '<span><b>Type a reading</b><small>One bill, meter reading or delivery</small></span></button>' +
+        '<button type="button" role="menuitem" data-act="add-pick" data-arg="upload">' + ic('upload') + '<span><b>Upload files</b><small>Bills, photos, CSV or Excel</small></span></button>' +
+        '<button type="button" role="menuitem" data-act="add-pick" data-arg="vision">' + ic('scan-line') + '<span><b>Read a meter photo</b><small>Computer Vision</small></span></button></div>' : '') +
+      '<input type="file" id="top-upload" multiple accept=".csv,.xlsx,.xls,.ods,.pdf,image/png,image/jpeg,image/webp,image/gif" data-ch="top-upload" hidden/></div>' +
       '<div class="rel"><button type="button" class="icon-btn" data-act="notif" aria-label="Notifications" aria-expanded="' + UI.notifOpen + '">' + ic('bell') + (notifs ? '<span class="badge-n">' + notifs + '</span>' : '') + '</button>' +
       (UI.notifOpen ? '<div class="notif" role="dialog" aria-label="Notifications"><div class="card-h" style="padding-bottom:8px"><h3>Notifications</h3><span class="sub">Generated from recorded data, not live sensors</span></div>' + alertList(vm.alerts) + '</div>' : '') + '</div>' +
-      '<button type="button" class="btn primary" data-act="go" data-arg="reports">' + ic('file-text') + '<span>Generate report</span></button>' +
+
       '<div class="rel"><button type="button" class="profile prof-btn" data-act="profile" aria-expanded="' + !!UI.profileOpen + '" aria-label="Account menu"><span class="avatar" aria-hidden="true">' + esc((S.settings.user.name || 'U').split(/\s+/).filter(Boolean).map((w) => w[0]).join('').slice(0, 2).toUpperCase()) + '</span><span class="who">' + esc(S.settings.user.name) + '<small>' + esc(S.settings.user.role) + '</small></span></button>' +
-      (UI.profileOpen ? '<div class="notif prof-menu" role="menu"><div class="pm-h"><b>' + esc(S.settings.user.name) + '</b><small>' + esc(S.settings.user.email || '') + '</small></div><button type="button" role="menuitem" data-act="pm-account">' + ic('user-round') + 'Account settings</button><button type="button" role="menuitem" data-act="theme">' + ic(theme() === 'dark' ? 'sun' : 'moon') + (theme() === 'dark' ? 'Light theme' : 'Dark theme') + '</button><button type="button" role="menuitem" data-act="pm-signout">' + ic('log-out') + 'Sign out</button></div>' : '') + '</div>';
+      (UI.profileOpen ? '<div class="notif prof-menu" role="menu"><div class="pm-h"><b>' + esc(S.settings.user.name) + '</b><small>' + esc(S.settings.user.email || '') + '</small></div><button type="button" role="menuitem" data-act="pm-account">' + ic('user-round') + 'Account settings</button><button type="button" role="menuitem" data-act="pm-report">' + ic('file-text') + 'Generate report</button><button type="button" role="menuitem" data-act="theme">' + ic(theme() === 'dark' ? 'sun' : 'moon') + (theme() === 'dark' ? 'Light theme' : 'Dark theme') + '</button><button type="button" role="menuitem" data-act="pm-signout">' + ic('log-out') + 'Sign out</button></div>' : '') + '</div>';
   }
   function alertList(alerts, max) {
     const list = max ? alerts.slice(0, max) : alerts;
@@ -194,13 +196,38 @@
   const TR = { view: null, sub: null, area: null, navTop: null };
   const reducedMotion = () => G.matchMedia && G.matchMedia('(prefers-reduced-motion: reduce)').matches;
   function replay(el, cls) { if (!el) return; el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); }
+  // staggered page transition: each block fades up out of a soft blur, with a lime sweep along the top
+  function pageAnim(content, cls, dir) {
+    if (!content) return;
+    clearTimeout(TR.timer);
+    content.classList.remove('pg-in', 'pg-sub');
+    content.style.setProperty('--dir', dir);
+    let i = 0;
+    content.querySelectorAll('.page-head, .card, .kpi, .tw-panel, .onb, .wa, .bp-wrap, .tabs, .ticker').forEach((el) => {
+      if (el.parentElement && el.parentElement.closest('.st')) return;
+      el.classList.add('st'); el.style.setProperty('--i', Math.min(i++, 14));
+    });
+    void content.offsetWidth; content.classList.add(cls);
+    const main = content.parentElement; let bar = main && main.querySelector(':scope > .route-bar');
+    if (main && !bar) { bar = document.createElement('span'); bar.className = 'route-bar'; bar.setAttribute('aria-hidden', 'true'); main.appendChild(bar); }
+    if (bar) replay(bar, 'go');
+    TR.timer = setTimeout(() => { content.classList.remove('pg-in', 'pg-sub'); content.querySelectorAll('.st').forEach((el) => el.classList.remove('st')); }, 1300);
+  }
+  function appEnter() {
+    const app = document.getElementById('app'), content = document.getElementById('content');
+    if (!app) return;
+    replay(app, 'app-enter'); pageAnim(content, 'pg-in', 1);
+    clearTimeout(TR.enterT); TR.enterT = setTimeout(() => app.classList.remove('app-enter'), 1500);
+  }
   function animateChange() {
     const sub = [UI.data && UI.data.tab, UI.settings && UI.settings.tab, UI.twin && UI.twin.layout, UI.twin && UI.twin.tab, UI.cvMode, UI.reports && UI.reports.tab, UI.twin && UI.twin.mode].join('|');
     const content = document.getElementById('content');
-    if (!reducedMotion()) {
-      if (TR.view !== null && TR.view !== UI.view) replay(content, 'pg-in');
-      else if (TR.sub !== null && TR.sub !== sub) replay(content, 'pg-sub');
-      else if (UI.view === 'twin' && TR.area !== null && TR.area !== UI.twin.area) replay(document.querySelector('.tw-panel'), 'pn-in');
+    {
+      if (TR.view !== null && TR.view !== UI.view) {
+        const order = NAV.flatMap((x) => x[1].map((y) => y[0]));
+        pageAnim(content, 'pg-in', order.indexOf(UI.view) >= order.indexOf(TR.view) ? 1 : -1);
+      } else if (TR.sub !== null && TR.sub !== sub) pageAnim(content, 'pg-sub', 1);
+      else if (UI.view === 'twin' && TR.area !== null && TR.area !== UI.twin.area) { const pn = document.querySelector('.tw-panel'); replay(pn, 'pn-fly'); countUpIn(pn); }
     }
     // sliding highlight behind the selected menu item
     const nav = document.getElementById('nav'); const on = nav && nav.querySelector('button.on');
@@ -242,12 +269,19 @@
 
   // ---------------- Events ----------------
   const ACT = {}, CH = {}, IN = {};
-  ACT.go = (v) => go(v);
+  ACT.go = (v) => {
+    const fx = G.CarbonOps.pagefx;
+    if (!fx || v === UI.view || document.getElementById('app').hidden) return go(v);
+    fx.run(() => go(v));
+  };
   ACT['toggle-nav'] = () => { UI.navOpen = !UI.navOpen; document.getElementById('app').classList.toggle('nav-open', UI.navOpen); };
-  ACT.profile = () => { UI.profileOpen = !UI.profileOpen; UI.notifOpen = false; renderTop(VM); icons(); };
+  ACT.profile = () => { UI.profileOpen = !UI.profileOpen; UI.notifOpen = false; UI.addOpen = false; renderTop(VM); icons(); };
   ACT['pm-account'] = () => { UI.profileOpen = false; UI.settings.tab = 'account'; go('settings'); };
   ACT['pm-signout'] = () => { UI.profileOpen = false; G.CarbonOps.auth.signOut(); };
-  ACT.notif = () => { UI.notifOpen = !UI.notifOpen; renderTop(VM); icons(); };
+  ACT.notif = () => { UI.notifOpen = !UI.notifOpen; UI.profileOpen = false; UI.addOpen = false; renderTop(VM); icons(); };
+  ACT['add-menu'] = () => { UI.addOpen = !UI.addOpen; UI.notifOpen = false; UI.profileOpen = false; renderTop(VM); icons(); };
+  ACT['add-pick'] = (k) => { UI.addOpen = false; renderTop(VM); icons(); if (k === 'type') ACT['qa-open'](); else if (k === 'upload') ACT['top-upload-open'](); else go('vision'); };
+  ACT['pm-report'] = () => { UI.profileOpen = false; go('reports'); };
   ACT['close-overlay'] = (a, el, e) => { if (el.dataset.self && e.target !== el) return; if (UI.modal) UI.modal = null; else UI.drawer = null; renderOverlay(); };
   ACT['close'] = () => { if (UI.modal) UI.modal = null; else UI.drawer = null; renderOverlay(); };
   CH.factory = (v) => { S.factoryId = v; UI.twin.area = 'lineB'; UI.sim.params = E.defaultParams(); save(); render(); toast('Showing ' + F().meta.short); };
@@ -259,7 +293,7 @@
     if (cc) { const [k, v] = cc.dataset.chartClick.split(':'); if (CHART_CLICK[k]) { CHART_CLICK[k](v); return; } }
     const t = e.target.closest('[data-act]');
     if (t && ACT[t.dataset.act]) { ACT[t.dataset.act](t.dataset.arg, t, e); return; }
-    if ((UI.notifOpen || UI.profileOpen) && !e.target.closest('.notif')) { UI.notifOpen = false; UI.profileOpen = false; renderTop(VM); icons(); }
+    if ((UI.notifOpen || UI.profileOpen || UI.addOpen) && !e.target.closest('.notif')) { UI.notifOpen = false; UI.profileOpen = false; UI.addOpen = false; renderTop(VM); icons(); }
   }
   const CHART_CLICK = {
     area: (id) => { UI.twin.area = id; UI.twin.part = null; go('twin'); },
@@ -323,7 +357,7 @@
   const THEME_KEY = 'carbonops-theme';
   function theme() { return document.documentElement.dataset.ui === 'light' ? 'light' : 'dark'; }
   function applyTheme(t) { document.documentElement.dataset.ui = t; try { localStorage.setItem(THEME_KEY, t); } catch (e) { /* ignore */ } }
-  ACT.theme = () => { applyTheme(theme() === 'dark' ? 'light' : 'dark'); render(); };
+  ACT.theme = () => { UI.profileOpen = false; applyTheme(theme() === 'dark' ? 'light' : 'dark'); render(); };
   ACT['theme-set'] = (t) => { applyTheme(t === 'light' ? 'light' : 'dark'); render(); };
   // ======================= OVERVIEW =======================
   const GLOSS = {
@@ -470,7 +504,7 @@
   }
   const SUBSTATION = [29, 0.4, 1.8, 1.8, 2.6];
   const PARTS = {
-    grid: { area: null, name: 'Grid connection (HT substation)', text: 'All purchased electricity enters the plant here. Its emissions use the CEA grid factor of 0.727 kg CO2 per kWh (location-based Scope 2).' },
+    grid: { area: null, name: 'Grid connection (HT substation)', text: 'All purchased electricity enters the plant here. Its emissions use the current all-India grid factor of 0.82 kg CO2 per kWh (location-based Scope 2).' },
     'boiler-stack': { area: 'boiler', name: 'Heater flue stack', text: 'Exhaust from LPG burned in the thermic fluid heater and furnaces. The CO2e figure is calculated from LPG bought (kg × factor), not measured at the stack. NOx and dust monitoring at the stack is separate and not part of this platform.' },
     'dg-stack': { area: 'dg', name: 'Generator exhaust stacks', text: 'Exhaust from the two 750 kVA standby generators. CO2e is calculated from diesel measured by flow meter DG-FM-01.' },
     trucks: { area: 'logistics', name: 'Truck docks', text: 'Third-party trucks bringing materials in and taking parts to customers. Tonne-km are estimated from invoice tonnage × route distance.' },
@@ -558,7 +592,7 @@
       const val = vals[ar.id]; const main = !P || ar._main;
       const col = c === 'change' ? diverge(val.v) : heat(val.v, max);
       const emis = m.emis[ar.id] || 0;
-      let g = '<g class="bld' + (sel === ar.id && !selPart ? ' sel' : '') + (sel === ar.id ? ' cur' : '') + '" data-chart-click="twin:' + ar.id + '" data-tip="' + esc('<b>' + esc(ar.name) + '</b><div>' + (emis ? tco2(emis) + ' t CO2e' : 'No activity data') + (m.elec[ar.id] ? ' · ' + n(m.elec[ar.id] / 1000) + ' MWh' : '') + (m.change[ar.id] != null ? ' · ' + pct(m.change[ar.id]) + (m.scenario ? ' simulated' : '') : '') + '</div><div style="opacity:.75">Click for details</div>') + '" role="button" tabindex="0" aria-label="' + esc(ar.name + ', ' + val.txt) + '">';
+      let g = '<g class="bld' + (sel === ar.id && !selPart ? ' sel' : '') + (sel === ar.id ? ' cur' : '') + (c !== 'change' && max > 0 && val.v >= max ? ' hot' : '') + '" data-chart-click="twin:' + ar.id + '" data-tip="' + esc('<b>' + esc(ar.name) + '</b><div>' + (emis ? tco2(emis) + ' t CO2e' : 'No activity data') + (m.elec[ar.id] ? ' · ' + n(m.elec[ar.id] / 1000) + ' MWh' : '') + (m.change[ar.id] != null ? ' · ' + pct(m.change[ar.id]) + (m.scenario ? ' simulated' : '') : '') + '</div><div style="opacity:.75">Click for details</div>') + '" role="button" tabindex="0" aria-label="' + esc(ar.name + ', ' + val.txt) + '">';
       g += boxSVG(x, y, w, d, h, col);
       g += '</g>';
       if (main && ar.stack && w >= 2 && d >= 1.8) { const pid = ar.id === 'boiler' ? 'boiler-stack' : 'dg-stack'; g += '<g class="bld part' + (selPart === pid ? ' sel' : '') + '" data-chart-click="part:' + pid + '" tabindex="0" role="button" aria-label="' + esc(PARTS[pid].name) + '" data-tip="' + esc('<b>' + esc(PARTS[pid].name) + '</b><div>Click for details</div>') + '">' + boxSVG(x + w - 1.6, y + 0.8, 0.9, 0.9, h + 3, 'var(--c6)') + (ar.id === 'dg' ? boxSVG(x + w - 3, y + 0.8, 0.9, 0.9, h + 2.4, 'var(--c6)') : '') + '</g>'; }
@@ -568,8 +602,9 @@
       if (UI.twin.labels) {
         const [lx, ly] = iso(x + w / 2, y + d / 2, h);
         const short = ar.fromPlan ? ar.name : ({ warehouse: 'Warehouse', boiler: 'Boiler', cooling: 'Cooling', logistics: 'Logistics', compressor: 'Compressors', dg: 'Generators', storage: 'Material storage', waste: 'Waste' })[ar.id] || ar.name;
-        labels.push('<text class="lbl" x="' + lx.toFixed(1) + '" y="' + (ly - 2).toFixed(1) + '" text-anchor="middle">' + esc((P && ar._label) || short) + '</text>' +
-          '<text class="lbl2" x="' + lx.toFixed(1) + '" y="' + (ly + 10).toFixed(1) + '" text-anchor="middle">' + esc(main ? (P && ar._label && ar._label.toLowerCase() !== short.toLowerCase() && !ar.fromPlan ? short + ' · ' : '') + val.txt : 'part of ' + short) + '</text>');
+        const on = sel === ar.id ? ' on' : '';
+        labels.push('<text class="lbl' + on + '" data-a="' + esc(ar.id) + '" x="' + lx.toFixed(1) + '" y="' + (ly - 2).toFixed(1) + '" text-anchor="middle">' + esc((P && ar._label) || short) + '</text>' +
+          '<text class="lbl2' + on + '" data-a="' + esc(ar.id) + '" x="' + lx.toFixed(1) + '" y="' + (ly + 10).toFixed(1) + '" text-anchor="middle">' + esc(main ? (P && ar._label && ar._label.toLowerCase() !== short.toLowerCase() && !ar.fromPlan ? short + ' · ' : '') + val.txt : 'part of ' + short) + '</text>');
       }
     });
     s += labels.join('') + '</g>';
@@ -584,8 +619,56 @@
     const zl = document.getElementById('twin-zl'); if (zl) zl.textContent = Math.round(t.z * 100) + '%';
   }
   function twinZoom(f) { const t = UI.twin; const z = Math.min(4, Math.max(1, t.z * f)); const k = z / t.z; t.tx *= k; t.ty *= k; t.z = z; if (z === 1) { t.tx = 0; t.ty = 0; } twinApply(document.getElementById('twin-svg')); }
+  // ---- fly the camera to a building, enlarge it and dim the rest ----
+  const TW = { busy: false };
+  const easeIO = (x) => x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
+  function twinAnimTo(to, ms, done) {
+    const svg = document.getElementById('twin-svg'); const t = UI.twin; const from = { z: t.z, tx: t.tx, ty: t.ty }; const t0 = performance.now();
+    TW.busy = true;
+    const step = (now) => {
+      const p = Math.min(1, (now - t0) / ms), e = easeIO(p);
+      t.z = from.z + (to.z - from.z) * e; t.tx = from.tx + (to.tx - from.tx) * e; t.ty = from.ty + (to.ty - from.ty) * e;
+      twinApply(document.getElementById('twin-svg') || svg);
+      if (p < 1) requestAnimationFrame(step); else { TW.busy = false; if (done) done(); }
+    };
+    requestAnimationFrame(step);
+  }
+  function twinFly(id, done) {
+    const svg = document.getElementById('twin-svg');
+    const g = svg && svg.querySelector('#twin-vp > [data-chart-click="twin:' + CSS.escape(id) + '"]');
+    if (!g) { if (done) done(); return false; }
+    const bb = g.getBBox(); const vb = vbOf(svg); const cx = vb.x + vb.width / 2, cy = vb.y + vb.height / 2;
+    const z = Math.min(3, Math.max(1.6, Math.min(vb.width * 0.36 / Math.max(bb.width, 1), vb.height * 0.42 / Math.max(bb.height, 1))));
+    const bx = bb.x + bb.width / 2, by = bb.y + bb.height / 2;
+    const wrap = svg.closest('.twin'); if (wrap) wrap.classList.add('focus');
+    svg.querySelectorAll('#twin-vp > .bld.cur, #twin-vp > .bld.sel').forEach((e) => e.classList.remove('cur', 'sel'));
+    svg.querySelectorAll('.lbl.on, .lbl2.on').forEach((e) => e.classList.remove('on'));
+    svg.querySelectorAll('[data-a="' + CSS.escape(id) + '"]').forEach((e) => e.classList.add('on'));
+    g.classList.add('cur', 'sel', 'pop');
+    const back = document.querySelector('.tw-back'); if (back) back.hidden = false;
+    const panel = document.querySelector('.tw-panel'); if (panel && UI.twin.area !== id) panel.classList.add('pn-out');
+    twinAnimTo({ z, tx: -z * (bx - cx), ty: -z * (by - cy) }, 850, done);
+    return true;
+  }
+  function twinUnfocus() {
+    UI.twin.focus = null;
+    const wrap = document.querySelector('.twin.focus'); if (wrap) wrap.classList.remove('focus');
+    const back = document.querySelector('.tw-back'); if (back) back.hidden = true;
+    twinAnimTo({ z: 1, tx: 0, ty: 0 }, 700);
+  }
+  ACT['twin-unfocus'] = () => twinUnfocus();
+  function countUpIn(root) {
+    if (!root) return;
+    root.querySelectorAll('[data-twnum]').forEach((s) => {
+      const v = +s.dataset.twnum, dec = +(s.dataset.dec || 0), fmt = s.dataset.fmt, t0 = performance.now();
+      const out = (x) => fmt === 't' ? tco2(x) : x.toFixed(dec);
+      const tick = (now) => { const p = Math.min(1, (now - t0) / 900), e = 1 - Math.pow(1 - p, 3); s.textContent = out(v * e); if (p < 1) requestAnimationFrame(tick); };
+      requestAnimationFrame(tick);
+    });
+  }
   function initTwin(el) {
     const svg = el.querySelector('#twin-svg'); if (!svg) return;
+    if (UI.twin.flyTo) { const id = UI.twin.flyTo; UI.twin.flyTo = null; Object.assign(UI.twin, { z: 1, tx: 0, ty: 0 }); setTimeout(() => twinFly(id), 450); }
     twinApply(svg);
     let drag = null;
     const ratio = () => { const vb = vbOf(svg); const r = svg.getBoundingClientRect(); return Math.max(vb.width / r.width, vb.height / r.height); };
@@ -616,7 +699,9 @@
     const legend = c === 'change'
       ? '<div class="heat-scale"><span>Down</span><i style="background:var(--dg2)"></i><i style="background:var(--dg1)"></i><i style="background:var(--dn)"></i><i style="background:var(--dr1)"></i><i style="background:var(--dr2)"></i><span>Up</span></div>'
       : '<div class="heat-scale"><span>Low</span><i style="background:var(--h0)"></i><i style="background:var(--h1)"></i><i style="background:var(--h2)"></i><i style="background:var(--h3)"></i><i style="background:var(--h4)"></i><span>High ' + esc(COLOR_BY[c].toLowerCase()) + '</span></div>';
-    return '<div class="twin' + (m.scenario ? ' scn' : '') + '">' + twinSVG(vm, m) + '</div>' +
+    const foc = UI.twin.focus && UI.twin.focus === UI.twin.area;
+    return '<div class="twin' + (m.scenario ? ' scn' : '') + (foc ? ' focus' : '') + '">' + twinSVG(vm, m) + '</div>' +
+      '<button type="button" class="tw-back"' + (foc ? '' : ' hidden') + ' data-act="twin-unfocus">' + ic('arrow-left') + 'Whole plant</button>' +
       '<div class="tw-tag">' + (m.scenario ? '<span class="chip st-simulated">What-if (simulated) · per year</span>' : '<span class="chip st-calculated">Recorded · ' + esc(vm.period.label) + '</span>') + (c === 'change' ? '<span class="small muted">' + (m.scenario ? 'vs today' : 'vs ' + (S.compare === 'yoy' ? 'same period last year' : 'previous period')) + '</span>' : '') + '</div>' +
       '<div class="tw-zoom"><button type="button" class="car-btn" data-act="twin-zoom" data-arg="in" aria-label="Zoom in">+</button><span id="twin-zl" class="small mono">100%</span><button type="button" class="car-btn" data-act="twin-zoom" data-arg="out" aria-label="Zoom out">−</button><button type="button" class="car-btn" data-act="twin-zoom" data-arg="reset" aria-label="Reset view">⟲</button></div>' +
       '<div class="tw-legend">' + legend + (P && G.CarbonOps.planBanner ? G.CarbonOps.planBanner() : '') + '<span class="small muted tw-hint">' + (P ? 'Built from your plan “' + esc(P.name) + '”' + (missing.length ? ' · not placed: ' + missing.map((a) => esc(a.name)).join(', ') : '') + ' · heights are typical for each area type, not measured' : 'Click any building or part · drag to move when zoomed · Ctrl + scroll or pinch to zoom') + '</span></div>';
@@ -650,7 +735,7 @@
   function partPanel(vm, pid, m) {
     const P = PARTS[pid];
     let metric = '';
-    if (pid === 'grid') { const e = Object.values(m.elec).reduce((t, v) => t + v, 0); metric = '<div class="tw-result"><div><span>Electricity in</span><b>' + n(e / 1000) + ' MWh</b></div><div><span>Emissions</span><b>' + tco2(e * 0.727) + ' t</b></div><div><span>Factor</span><b>0.727</b></div></div>'; }
+    if (pid === 'grid') { const e = Object.values(m.elec).reduce((t, v) => t + v, 0); metric = '<div class="tw-result"><div><span>Electricity in</span><b>' + n(e / 1000) + ' MWh</b></div><div><span>Emissions</span><b>' + tco2(e * E.factor(S.reg, 'grid-in').kgPer) + ' t</b></div><div><span>Factor</span><b>' + E.factor(S.reg, 'grid-in').value + '</b></div></div>'; }
     else if (pid.startsWith('eq:')) return '';
     return '<div class="tw-part"><div class="eyebrow">Part</div><h3>' + esc(P.name) + '</h3><p class="small" style="margin:4px 0 0">' + esc(P.text) + '</p>' + metric +
       (P.area ? '<button type="button" class="sl-link" style="margin-top:8px" data-chart-click="twin:' + P.area + '">Open ' + esc(area(P.area).name) + ' ' + ic('arrow-right') + '</button>' : '') + '</div>';
@@ -670,7 +755,19 @@
     const tabs = [['overview', 'Overview'], ['data', 'Data'], ['whatif', 'What if?'], ['compare', 'Compare']];
     let body = '';
     if (t.tab === 'overview') {
-      body = '<div class="tw-big"><div><span>Emissions</span><b>' + (a.total ? tco2(a.total) : '—') + '<small> t CO2e</small></b></div><div><span>Share of site</span><b>' + (a.total ? (share * 100).toFixed(1) + '%' : '—') + '</b></div></div>' +
+      const cmpA = vm.cmpMonths ? E.aggregate(vm.f.records, vm.cmpMonths, S.settings, (r) => r.area === id) : null;
+      const dl = cmpA && cmpA.total ? a.total / cmpA.total - 1 : null;
+      const hist = E.aggregate(vm.f.records, vm.months, S.settings, (r) => r.area === id);
+      const hv = vm.months.slice(-12).map((mm) => (hist.byMonth[mm] ? hist.byMonth[mm].total : 0) / 1000);
+      const hmax = Math.max(0.001, ...hv), hmin = Math.min(...hv.filter((v) => v > 0).concat([hmax])) * 0.6;
+      const hp = hv.map((v, i) => [(hv.length < 2 ? 150 : i * 300 / (hv.length - 1)), 58 - (Math.max(0, v - hmin) / Math.max(0.001, hmax - hmin)) * 50]);
+      const hpath = hp.map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ',' + q[1].toFixed(1)).join(' ');
+      const acc = areaColor(id), sp = Math.max(0, Math.min(100, share * 100));
+      body = '<div class="tw-hero"><svg class="tw-ring" viewBox="0 0 42 42" aria-hidden="true"><circle cx="21" cy="21" r="15.9155" fill="none" stroke="rgba(255,255,255,.07)" stroke-width="4"/><circle class="rg" cx="21" cy="21" r="15.9155" fill="none" stroke="' + acc + '" stroke-width="4" stroke-linecap="round" stroke-dasharray="' + sp.toFixed(1) + ' ' + (100 - sp).toFixed(1) + '" stroke-dashoffset="25" style="filter:drop-shadow(0 0 2px ' + acc + ')"/>' +
+        '<text x="21" y="21" text-anchor="middle" font-size="7" font-weight="800">' + (a.total ? '<tspan data-twnum="' + sp + '" data-dec="1">' + sp.toFixed(1) + '</tspan>%' : '—') + '</text><text x="21" y="27" text-anchor="middle" font-size="3" opacity=".6">of site</text></svg>' +
+        '<div><span class="tw-l">Emissions · ' + esc(vm.period.label) + '</span><div class="tw-num">' + (a.total ? '<span data-twnum="' + a.total + '" data-fmt="t">' + tco2(a.total) + '</span>' : '—') + '<small>t CO2e</small></div>' +
+        (dl == null ? '<span class="tw-dl">No comparison</span>' : '<span class="tw-dl ' + (dl > 0 ? 'up' : 'down') + '">' + (dl > 0 ? '▲ ' : '▼ ') + Math.abs(dl * 100).toFixed(1) + '% vs ' + (S.compare === 'yoy' ? 'last year' : 'previous period') + '</span>') + '</div></div>' +
+        (hv.some((v) => v > 0) ? '<div class="tw-spark"><svg viewBox="0 0 300 64" preserveAspectRatio="none" aria-label="Monthly emissions for this area"><defs><linearGradient id="twsg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + acc + '" stop-opacity=".35"/><stop offset="1" stop-color="' + acc + '" stop-opacity="0"/></linearGradient></defs><path d="' + hpath + ' L300,64 L0,64Z" fill="url(#twsg)"/><path class="sl" d="' + hpath + '" fill="none" stroke="' + acc + '" stroke-width="2.4" vector-effect="non-scaling-stroke" pathLength="1"/></svg><div class="tw-spark-l"><span>' + esc(D.monthLabel(vm.months.slice(-12)[0])) + '</span><span>Last 12 months</span><span>' + esc(D.monthLabel(vm.months[vm.months.length - 1])) + '</span></div></div>' : '') +
         '<div class="metric-grid">' +
         '<div class="metric"><span>Electricity</span><b>' + (a.elecKWh ? n(a.elecKWh / 1000) + ' MWh' : '—') + '</b></div>' +
         '<div class="metric"><span>Fuel</span><b>' + (a.dieselL ? n(a.dieselL) + ' L diesel' : a.lpgKg ? n(a.lpgKg / 1000, 1) + ' t LPG' : '—') + '</b></div>' +
@@ -695,7 +792,7 @@
       '<label class="check small"><input type="checkbox" data-ch="twin-labels"' + (t.labels ? ' checked' : '') + '/> Labels</label>' + (t.layout !== 'blueprint' ? '<label class="check small"><input type="checkbox" data-ch="twin-flows"' + (t.flows ? ' checked' : '') + '/> Electricity flows</label>' : '') + '</div>' +
       '<div class="tw-layout">' +
       '<div class="card tw-stage" id="twin-stage"><div id="twin-map" class="tw-map">' + LIVE['twin-map'](vm) + '</div></div>' +
-      '<aside class="card tw-panel" aria-label="Selected area">' +
+      '<aside class="card tw-panel" aria-label="Selected area" style="--acc:' + areaColor(id) + '">' +
       (t.part && PARTS[t.part] ? '<div class="card-b" style="border-bottom:1px solid var(--line-2)">' + partPanel(vm, t.part, m) + '</div>' : '') +
       '<div class="card-b" style="padding-bottom:0"><div class="eyebrow">' + esc(ar.kind) + '</div><h2 class="tw-name">' + esc(ar.name) + '</h2>' +
       '<div class="tw-pick"><label for="tw-area" class="small muted">Jump to</label><select id="tw-area" data-ch="twin-area">' + D.AREAS.map((x) => '<option value="' + x.id + '"' + (x.id === id ? ' selected' : '') + '>' + esc(x.name) + '</option>').join('') + '</select></div>' + '<button type="button" class="btn sm" style="margin-top:8px" data-act="qa-open" data-arg="' + id + '">' + ic('plus') + 'Add data for ' + esc(ar.name) + '</button></div>' +
@@ -707,11 +804,11 @@
   ACT['twin-color'] = (c) => { UI.twin.color = c; render(); };
   ACT['twin-tab'] = (k) => { UI.twin.tab = k; render(); };
   ACT['twin-eq'] = (i) => { UI.twin.part = UI.twin.part === 'eq:' + i ? null : 'eq:' + i; render(); };
-  ACT['twin-zoom'] = (k) => { if (k === 'reset') { Object.assign(UI.twin, { z: 1, tx: 0, ty: 0 }); twinApply(document.getElementById('twin-svg')); } else twinZoom(k === 'in' ? 1.25 : 0.8); };
+  ACT['twin-zoom'] = (k) => { if (k === 'reset') { twinUnfocus(); } else twinZoom(k === 'in' ? 1.25 : 0.8); };
   ACT['twin-records'] = () => { Object.assign(UI.explorer, { area: UI.twin.area, cat: 'all', scope: 'all', status: 'all', q: '', source: null }); go('explorer'); };
   CH['twin-labels'] = (v, el) => { UI.twin.labels = el.checked; refreshLive(['twin-map']); };
   CH['twin-flows'] = (v, el) => { UI.twin.flows = el.checked; refreshLive(['twin-map']); };
-  CH['twin-area'] = (v) => { UI.twin.area = v; UI.twin.part = null; render(); };
+  CH['twin-area'] = (v) => CHART_CLICK.twin(v);
   // ---------------- Blueprint layout (user's own floor plan) ----------------
   function dataUrlToBlob(u) { const [h, b64] = u.split(','); const mime = (h.match(/data:([^;]+)/) || [])[1] || 'image/png'; const bin = atob(b64); const arr = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i); return new Blob([arr], { type: mime }); }
   function bpOf() { return F().blueprint || null; }
@@ -856,7 +953,18 @@
   CH['bp-name'] = (v) => { UI.twin.bpName = v; };
   CH['bp-rename'] = (v, el) => { const bp = bpOf(); const z = bp && bp.zones[Number(el.dataset.i)]; if (!z) return; z.label = v.trim() || z.label; if (F().roomNames && z.area) F().roomNames[z.area] = (G.CarbonOps.niceLabel || String)(z.label); save(); render(); };
   CH['bp-link'] = (v, el) => { const bp = bpOf(); const z = bp && bp.zones[Number(el.dataset.i)]; if (!z) return; z.area = v || null; if (z.ai) z.conf = 'you'; save(); refreshLive(['twin-map']); };
-  CHART_CLICK.twin = (id) => { UI.twin.area = id; UI.twin.part = null; if (UI.view !== 'twin') go('twin'); else render(); };
+  CHART_CLICK.twin = (id) => {
+    UI.twin.part = null;
+    const svg = document.getElementById('twin-svg');
+    if (UI.view === 'twin' && svg && UI.twin.layout !== 'blueprint') {
+      if (TW.busy) return;
+      UI.twin.focus = id;
+      if (!twinFly(id, () => { if (UI.twin.area !== id) { UI.twin.area = id; TW.panelFly = true; render(); } })) { UI.twin.area = id; render(); }
+      return;
+    }
+    UI.twin.area = id; UI.twin.focus = id; UI.twin.flyTo = id;
+    if (UI.view !== 'twin') go('twin'); else render();
+  };
   CHART_CLICK.part = (pid) => { UI.twin.part = pid; const P = PARTS[pid]; if (P && P.area) UI.twin.area = P.area; render(); };
   const SLF = {
     pc: (v) => (v > 0 ? '+' : '') + v + '%', h: (v) => v + ' h', abs: (v) => v + '%', pts: (v) => (v > 0 ? '+' : '') + v + ' pts',
@@ -900,6 +1008,8 @@
     return rows;
   }
   const qtyTxt = (v, unit) => n(v, unit === 't' || (unit === 'kg' && v < 100) ? 1 : 0) + ' ' + unit;
+  const srcName = (cat, ar) => esc(catLabel(cat)) + ' <span class="ex2-dash">— ' + esc(area(ar).name) + '</span>';
+  const SCOPE_NAME = { 1: 'Fuel burned on site', 2: 'Electricity bought', 3: 'Supply chain' };
   LIVE['exp-body'] = (vm) => {
     const x = UI.explorer;
     const all = explorerRows(vm, true);
@@ -911,67 +1021,83 @@
     cmpRecs.forEach((r) => { const b = bySrc[r.area + '|' + r.category]; if (b && r.calc && r.calc.kg) b.prev += r.calc.kg; });
     const ranked = Object.values(bySrc).sort((a, b) => b.kg - a.kg || b.qty - a.qty);
     const tot = ranked.reduce((t, s) => t + s.kg, 0);
-    const shown = rows.slice(0, x.limit || 15);
+    const shown = rows.slice(0, x.limit || 10);
     const src = x.source ? bySrc[x.source] : null;
     const sh = (v) => (tot ? (v / tot) * 100 : 0);
-    // ---- summary ----
-    let h = '<div class="ex-sum"><div><span>Emissions in view</span><b>' + tco2(tot) + '<small> t CO2e</small></b></div><div><span>Sources</span><b>' + ranked.length + '</b></div><div><span>Monthly records</span><b>' + all.length + '</b></div><div><span>Biggest source</span><b class="ex-top">' + (ranked[0] ? esc(catLabel(ranked[0].cat)) + '<small> ' + esc(area(ranked[0].area).name) + ' · ' + Math.round(sh(ranked[0].kg)) + '%</small>' : '—') + '</b></div></div>';
-    if (!ranked.length) return h + '<div class="chart-empty">Nothing matches these filters. Try “All” in one of the boxes above.</div>';
-    // ---- slides ----
-    h += carousel('exp', 'Sources one at a time', 'Biggest first. Click a card to jump to its records.', ranked.map((s, i) => {
-      const cat = D.CATEGORIES[s.cat]; const f = E.factor(S.reg, cat.factor);
-      const kgPer = s.qty && s.kg ? s.kg / s.qty : f.kgPer;
-      const d = s.prev ? s.kg / s.prev - 1 : null; const on = x.source === s.k;
-      return { color: catColor(s.cat), cls: 'slide-click' + (on ? ' on' : ''), attrs: ' data-act="exp-src" data-arg="' + s.k + '" tabindex="0" title="Show its records"', html:
-        '<div class="sl-top"><span class="sl-tag">Scope ' + cat.scope + ' · ' + esc(({ 1: 'fuel burned on site', 2: 'electricity bought', 3: 'supply chain' })[cat.scope]) + '</span><span class="sl-rank">#' + (i + 1) + '</span></div>' +
-        '<div><div class="sl-name">' + esc(cat.label) + '</div><div class="small muted">' + esc(area(s.area).name) + '</div></div>' +
-        (s.prov === s.n ? '<div class="sl-big muted" style="font-size:24px">Not counted</div><p class="sl-text">No validated emission factor yet, so these ' + s.n + ' records are left out of the totals. Add a supplier factor in Settings.</p>'
-          : '<div class="sl-big">' + tco2(s.kg) + '<small>t CO2e</small></div>' +
-          '<div class="sl-share"><span class="sl-bar"><i style="width:' + Math.max(1, sh(s.kg)) + '%"></i></span><b>' + (sh(s.kg) < 1 ? '<1' : Math.round(sh(s.kg))) + '%</b><span>of this view</span></div>' +
-          '<div class="ex-sum-calc"><div><span>Amount used</span><b>' + qtyTxt(s.qty, cat.unit) + '</b></div><span class="ex-x">×</span><div><span>Factor</span><b>' + n(kgPer, kgPer < 1 ? 3 : kgPer < 100 ? 2 : 0) + '</b><small>kg per ' + esc(cat.unit) + '</small></div><span class="ex-x">=</span><div><span>Emissions</span><b>' + tco2(s.kg) + ' t</b></div></div>' +
-          '<p class="sl-text">' + esc(CAT_PLAIN[s.cat] || '') + (f.quality === 'illustrative' ? ' The factor is a placeholder, so treat this as indicative.' : '') + '</p>') +
-        '<div class="sl-foot"><span>' + (d == null ? '<span class="muted">No comparison data</span>' : '<b class="' + (d > 0 ? 'bad-t' : 'good-t') + '">' + (d > 0 ? '▲ ' : '▼ ') + Math.abs(d * 100).toFixed(1) + '%</b> <span class="muted">vs ' + (S.compare === 'yoy' ? 'last year' : 'previous period') + '</span>') + '</span><span class="sl-chips">' + [...s.statuses].map((st) => chip(st)).join('') + '</span></div>' +
-        '<div class="row between" style="gap:12px"><span class="sl-hint">' + (on ? '✓ Showing its records below' : 'Click to see its records') + '</span><button type="button" class="sl-link" data-chart-click="area:' + s.area + '">Open in twin ' + ic('arrow-right') + '</button></div>' };
-    }));
-    // ---- records ----
-    h += '<div class="card" id="exp-records"><div class="card-h"><div><h3>' + (src ? esc(catLabel(src.cat)) + ' · ' + esc(area(src.area).name) : 'All records') + '</h3><span class="sub">' + rows.length + ' monthly record' + (rows.length === 1 ? '' : 's') + '. Each line is one month: amount used × factor = emissions. Click a line for the full detail.</span></div>' +
-      '<div class="row">' + (src ? '<button type="button" class="btn sm" data-act="exp-clear-src">' + ic('x') + 'Show all sources</button>' : '') +
-      '<div class="seg" role="group" aria-label="Order"><button type="button" class="' + (x.sort !== 'month' ? 'on' : '') + '" data-act="exp-order" data-arg="kg">Biggest first</button><button type="button" class="' + (x.sort === 'month' ? 'on' : '') + '" data-act="exp-order" data-arg="month">Newest first</button></div>' +
-      '<button type="button" class="btn sm" data-act="exp-export">' + ic('download') + 'Export CSV</button></div></div>' +
-      '<div class="card-b"><div class="ex-list">' + shown.map((o) => {
+    const shTxt = (v) => (sh(v) < 1 && v > 0 ? '<1' : Math.round(sh(v))) + '%';
+    if (!ranked.length) return '<div class="ex2-card"><div class="chart-empty">Nothing matches these filters. Clear the search or pick “All”.</div></div>';
+    // ---- 1. total + one bar split by source ----
+    const top = ranked.slice(0, 6), rest = ranked.slice(6).reduce((t, s) => t + s.kg, 0);
+    let h = '<section class="ex2-card ex2-hero"><div><span class="ex2-l">Emissions in view</span><div class="ex2-big">' + tco2(tot) + '<small>t CO₂e</small></div>' +
+      '<div class="ex2-meta"><span>' + ranked.length + ' source' + (ranked.length === 1 ? '' : 's') + '</span><span>' + all.length + ' monthly records</span><span>' + esc(vm.period.label) + '</span></div></div>' +
+      '<div class="ex2-split"><div class="ex2-bar">' + top.map((s) => '<span data-act="exp-src" data-arg="' + esc(s.k) + '" style="flex:' + Math.max(0.6, sh(s.kg)).toFixed(2) + ';background:' + catColor(s.cat) + '" data-tip="' + esc('<b>' + esc(catLabel(s.cat)) + ' — ' + esc(area(s.area).name) + '</b><div>' + tco2(s.kg) + ' t · ' + shTxt(s.kg) + '</div>') + '"></span>').join('') + (rest > 0 ? '<span style="flex:' + Math.max(0.6, sh(rest)).toFixed(2) + ';background:#3A463E" data-tip="' + esc('<b>' + (ranked.length - 6) + ' smaller sources</b><div>' + tco2(rest) + ' t</div>') + '"></span>' : '') + '</div>' +
+      '<div class="ex2-keys">' + top.slice(0, 3).map((s) => '<button type="button" data-act="exp-src" data-arg="' + esc(s.k) + '"><i style="background:' + catColor(s.cat) + '"></i><span>' + srcName(s.cat, s.area) + '</span><b>' + shTxt(s.kg) + '</b></button>').join('') + '</div></div></section>';
+    // ---- 2. ranked sources + detail of the selected one ----
+    const sel = src || ranked[0];
+    const many = x.allSrc ? ranked : ranked.slice(0, 7);
+    h += '<div class="ex2-grid"><section class="ex2-card"><div class="ex2-h"><h3>Sources, biggest first</h3><span>Click one to see its records</span></div><div class="ex2-srcs">' + many.map((s, i) => {
+      const d = s.prev ? s.kg / s.prev - 1 : null;
+      return '<button type="button" class="ex2-src' + (sel === s ? ' on' : '') + '" data-act="exp-src" data-arg="' + esc(s.k) + '"><span class="ex2-rank">' + (i + 1) + '</span><i class="ex2-dot" style="background:' + catColor(s.cat) + '"></i>' +
+        '<span class="ex2-nm">' + srcName(s.cat, s.area) + '<span class="ex2-sbar"><i style="width:' + Math.max(1.5, sh(s.kg)).toFixed(1) + '%;background:' + catColor(s.cat) + '"></i></span></span>' +
+        '<span class="ex2-v"><b>' + (s.prov === s.n ? '—' : tco2(s.kg) + ' t') + '</b><small>' + (s.prov === s.n ? 'not counted' : shTxt(s.kg)) + '</small></span>' +
+        '<span class="ex2-d ' + (d == null ? '' : d > 0 ? 'up' : 'down') + '">' + (d == null ? '' : (d > 0 ? '▲ ' : '▼ ') + Math.abs(d * 100).toFixed(1) + '%') + '</span></button>';
+    }).join('') + '</div>' + (ranked.length > 7 ? '<button type="button" class="ex2-link" data-act="exp-allsrc">' + (x.allSrc ? 'Show fewer' : 'Show all ' + ranked.length + ' sources') + '</button>' : '') + '</section>';
+    {
+      const s = sel; const cat = D.CATEGORIES[s.cat]; const f = E.factor(S.reg, cat.factor);
+      const kgPer = s.qty && s.kg ? s.kg / s.qty : f.kgPer; const d = s.prev ? s.kg / s.prev - 1 : null;
+      const mon = {}; vm.f.records.forEach((r) => { if (r.area === s.area && r.category === s.cat && r.calc && r.calc.kg) mon[r.month] = (mon[r.month] || 0) + r.calc.kg; });
+      const ms = vm.months.slice(-12), hv = ms.map((m) => (mon[m] || 0) / 1000), mx = Math.max(0.001, ...hv), nz = hv.filter((v) => v > 0), mn = nz.length ? Math.min(...nz) * 0.6 : 0;
+      const pts = hv.map((v, i) => [(ms.length < 2 ? 150 : i * 300 / (ms.length - 1)), 56 - (Math.max(0, v - mn) / Math.max(0.001, mx - mn)) * 46]);
+      const path = pts.map((q, i) => (i ? 'L' : 'M') + q[0].toFixed(1) + ',' + q[1].toFixed(1)).join(' '); const col = catColor(s.cat);
+      h += '<section class="ex2-card ex2-detail" style="--c:' + col + '"><span class="ex2-l">' + (src ? 'Selected source' : 'Biggest source') + ' · ' + SCOPE_NAME[cat.scope] + '</span><h3 class="ex2-title">' + srcName(s.cat, s.area) + '</h3>' +
+        (s.prov === s.n ? '<p class="small muted">No validated emission factor yet, so these ' + s.n + ' records are left out of the totals. Add a supplier factor in Settings.</p>'
+          : '<div class="ex2-dbig">' + tco2(s.kg) + '<small>t CO₂e · ' + shTxt(s.kg) + ' of view</small>' + (d == null ? '' : '<span class="ex2-d ' + (d > 0 ? 'up' : 'down') + '">' + (d > 0 ? '▲ ' : '▼ ') + Math.abs(d * 100).toFixed(1) + '%</span>') + '</div>' +
+          '<div class="ex2-calc"><div><span>Amount used</span><b>' + qtyTxt(s.qty, cat.unit) + '</b></div><em>×</em><div><span>Factor</span><b>' + n(kgPer, kgPer < 1 ? 3 : kgPer < 100 ? 2 : 0) + '</b><small>kg per ' + esc(cat.unit) + '</small></div><em>=</em><div class="eq"><span>Emissions</span><b>' + tco2(s.kg) + ' t</b></div></div>' +
+          (nz.length ? '<div class="ex2-spark"><svg viewBox="0 0 300 60" preserveAspectRatio="none"><defs><linearGradient id="exsg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="' + col + '" stop-opacity=".35"/><stop offset="1" stop-color="' + col + '" stop-opacity="0"/></linearGradient></defs><path d="' + path + ' L300,60 L0,60Z" fill="url(#exsg)"/><path class="sl" d="' + path + '" fill="none" stroke="' + col + '" stroke-width="2.4" vector-effect="non-scaling-stroke" pathLength="1"/></svg><div class="ex2-sl"><span>' + esc(D.monthLabel(ms[0])) + '</span><span>Last 12 months</span><span>' + esc(D.monthLabel(ms[ms.length - 1])) + '</span></div></div>' : '') +
+          '<p class="ex2-desc">' + esc(CAT_PLAIN[s.cat] || '') + (f.quality === 'illustrative' ? ' The factor is a placeholder, so treat this as indicative.' : '') + '</p>') +
+        '<div class="ex2-acts">' + (src ? '<button type="button" class="ov-btn ghost" data-act="exp-clear-src">' + ic('x') + 'All sources</button>' : '<button type="button" class="ov-btn ghost" data-act="exp-src" data-arg="' + esc(s.k) + '">Show its records</button>') + '<button type="button" class="ov-btn" data-chart-click="area:' + esc(s.area) + '">Open in twin ' + ic('arrow-right') + '</button></div></section></div>';
+    }
+    // ---- 3. records ----
+    h += '<section class="ex2-card" id="exp-records"><div class="ex2-h"><div><h3>' + (src ? srcName(src.cat, src.area) : 'All records') + '</h3><span>' + rows.length + ' monthly record' + (rows.length === 1 ? '' : 's') + ' · amount × factor = emissions · click a line for detail</span></div>' +
+      '<div class="ex2-tools"><div class="seg" role="group" aria-label="Order"><button type="button" class="' + (x.sort !== 'month' ? 'on' : '') + '" data-act="exp-order" data-arg="kg">Biggest</button><button type="button" class="' + (x.sort === 'month' ? 'on' : '') + '" data-act="exp-order" data-arg="month">Newest</button></div>' +
+      '<button type="button" class="btn sm" data-act="exp-export">' + ic('download') + 'CSV</button></div></div>' +
+      '<div class="ex2-recs">' + shown.map((o) => {
         const r = o.r; const c = D.CATEGORIES[r.category];
         const f = r.calc ? E.factor(S.reg, r.calc.factorId) : null;
-        return '<button type="button" class="ex-row" data-act="exp-open" data-arg="' + esc(r.id) + '">' +
-          '<span class="ex-month">' + esc(D.monthLabel(r.month)) + '</span>' +
-          '<span class="ex-main"><b><i class="sw" style="background:' + catColor(r.category) + '"></i>' + esc(c.label) + '</b><small>' + esc(area(r.area).name) + ' · ' + esc(r.stream) + '</small></span>' +
-          '<span class="ex-calc">' + (r.calc && r.calc.kgPer != null ? qtyTxt(r.qty, c.unit) + ' <span class="muted">× ' + n(r.calc.kgPer, r.calc.kgPer < 1 ? 3 : r.calc.kgPer < 100 ? 2 : 0) + '</span>' : qtyTxt(r.qty, c.unit) + ' <span class="muted">× no factor</span>') + '</span>' +
-          '<span class="ex-kg">' + (o.kg == null ? '<span class="chip st-provisional">not counted</span>' : tco2(o.kg) + ' t') + '</span>' +
-          '<span class="ex-st">' + chip(r.status) + (r.history && r.history.length ? '<span class="chip st-review">edited</span>' : '') + (f && r.calc && f.latest !== r.calc.v ? '<span class="chip st-review">old factor</span>' : '') + '</span></button>';
+        const flags = (r.history && r.history.length ? '<span class="chip st-review">edited</span>' : '') + (f && r.calc && f.latest !== r.calc.v ? '<span class="chip st-review">old factor</span>' : '');
+        return '<button type="button" class="ex2-rec" data-act="exp-open" data-arg="' + esc(r.id) + '" title="' + esc(r.stream + ' · ' + r.source) + '">' +
+          '<span class="ex2-m">' + esc(D.monthLabel(r.month)) + '</span>' +
+          '<span class="ex2-rn"><i class="ex2-dot" style="background:' + catColor(r.category) + '"></i><span class="ex2-rt">' + srcName(r.category, r.area) + '</span></span>' +
+          '<span class="ex2-rc">' + (r.calc && r.calc.kgPer != null ? qtyTxt(r.qty, c.unit) + ' <span class="muted">× ' + n(r.calc.kgPer, r.calc.kgPer < 1 ? 3 : r.calc.kgPer < 100 ? 2 : 0) + '</span>' : qtyTxt(r.qty, c.unit) + ' <span class="muted">× no factor</span>') + '</span>' +
+          '<span class="ex2-rk">' + (o.kg == null ? '<span class="chip st-provisional">not counted</span>' : tco2(o.kg) + ' t') + '</span>' +
+          '<span class="ex2-rs">' + chip(r.status) + flags + '</span></button>';
       }).join('') + '</div>' +
-      (rows.length > shown.length ? '<div class="row" style="justify-content:center;margin-top:10px"><button type="button" class="btn" data-act="exp-more">Show more (' + (rows.length - shown.length) + ' left)</button></div>' : '') +
-      '</div></div>';
+      (rows.length > shown.length ? '<div class="ex2-more"><button type="button" class="ex2-link" data-act="exp-more">Show more · ' + (rows.length - shown.length) + ' left</button></div>' : '') + '</section>';
     return h;
   };
   VIEWS.explorer = (vm) => {
     const x = UI.explorer;
     const opt = (v, l, cur) => '<option value="' + v + '"' + (cur === v ? ' selected' : '') + '>' + esc(l) + '</option>';
-    return '<div class="page-head"><div><div class="eyebrow">' + esc(vm.meta.short) + ' · ' + esc(vm.period.label) + '</div><h1>Emissions Explorer</h1><p>Find out exactly where each tonne comes from. Every number is simply the amount used × an emission factor.</p></div></div>' +
-      '<div class="card"><div class="card-b"><div class="fields">' +
-      '<div class="field"><label for="ex-q">Search</label><input type="search" id="ex-q" placeholder="Material, machine, fuel, meter…" value="' + esc(x.q) + '" data-in="exp-q"/></div>' +
-      '<div class="field"><label for="ex-scope">Scope</label><select id="ex-scope" data-ch="exp" data-key="scope">' + opt('all', 'All scopes', x.scope) + opt('1', 'Scope 1', x.scope) + opt('2', 'Scope 2', x.scope) + opt('3', 'Scope 3', x.scope) + '</select></div>' +
-      '<div class="field"><label for="ex-area">Factory area</label><select id="ex-area" data-ch="exp" data-key="area">' + opt('all', 'All areas', x.area) + D.AREAS.map((a) => opt(a.id, a.name, x.area)).join('') + '</select></div>' +
-      '<div class="field"><label for="ex-cat">Source category</label><select id="ex-cat" data-ch="exp" data-key="cat">' + opt('all', 'All categories', x.cat) + Object.keys(D.CATEGORIES).filter((c) => c !== 'production').map((c) => opt(c, catLabel(c), x.cat)).join('') + '</select></div>' +
-      '<div class="field"><label for="ex-status">Data status</label><select id="ex-status" data-ch="exp" data-key="status">' + opt('all', 'All', x.status) + ['measured', 'imported', 'estimated', 'verified', 'review'].map((s) => opt(s, ST[s][0], x.status)).join('') + '</select></div>' +
-      '<div class="field"><label for="ex-period">Reporting period</label><select id="ex-period" data-ch="period">' + vm.periods.map((p) => opt(p.id, p.label, vm.period.id)).join('') + '</select></div>' +
-      '</div></div></div>' +
-      '<div id="exp-body" class="stack" style="gap:16px">' + LIVE['exp-body'](vm) + '</div>' +
-      '<p class="small muted" style="margin:0">CO2e covers greenhouse gases only. Dust, NOx, SO2 and water pollution need their own monitoring.</p>';
+    const more = x.cat !== 'all' || x.status !== 'all' || x.moreF;
+    return '<div class="ex2">' +
+      '<header class="ov-head"><div><h1>Emissions Explorer</h1><p>Where every tonne comes from · amount used × emission factor</p></div></header>' +
+      '<div class="ex2-card ex2-filters"><div class="ex2-search">' + ic('search') + '<input type="search" id="ex-q" placeholder="Search a material, machine, fuel or meter" value="' + esc(x.q) + '" data-in="exp-q" aria-label="Search records"/></div>' +
+      '<div class="seg ex2-scopes" role="group" aria-label="Scope">' + [['all', 'All'], ['1', 'Fuel'], ['2', 'Electricity'], ['3', 'Supply chain']].map(([k, l]) => '<button type="button" class="' + (x.scope === k ? 'on' : '') + '" data-act="exp-scope" data-arg="' + k + '">' + l + '</button>').join('') + '</div>' +
+      '<select id="ex-area" class="ex2-sel" data-ch="exp" data-key="area" aria-label="Factory area">' + opt('all', 'All areas', x.area) + D.AREAS.map((a) => opt(a.id, a.name, x.area)).join('') + '</select>' +
+      '<button type="button" class="ex2-link" data-act="exp-morefilters" aria-expanded="' + (more ? 'true' : 'false') + '">' + ic('sliders-horizontal') + (more ? 'Fewer filters' : 'More filters') + '</button>' +
+      (more ? '<div class="ex2-extra"><select id="ex-cat" class="ex2-sel" data-ch="exp" data-key="cat" aria-label="Source category">' + opt('all', 'All categories', x.cat) + Object.keys(D.CATEGORIES).filter((c) => c !== 'production').map((c) => opt(c, catLabel(c), x.cat)).join('') + '</select>' +
+        '<select id="ex-status" class="ex2-sel" data-ch="exp" data-key="status" aria-label="Data status">' + opt('all', 'Any data status', x.status) + ['measured', 'imported', 'estimated', 'verified', 'review'].map((st) => opt(st, ST[st][0], x.status)).join('') + '</select></div>' : '') + '</div>' +
+      '<div id="exp-body" class="ex2-body">' + LIVE['exp-body'](vm) + '</div>' +
+      '<p class="small muted" style="margin:0">CO₂e covers greenhouse gases only. Dust, NOx, SO₂ and water pollution need their own monitoring.</p></div>';
   };
-  const expReset = () => { UI.explorer.source = null; UI.explorer.limit = 15; UI.car.exp = 0; };
+  ACT['exp-scope'] = (k) => { UI.explorer.scope = k; expReset(); render(); };
+  ACT['exp-morefilters'] = () => { const x = UI.explorer; const open = x.cat !== 'all' || x.status !== 'all' || x.moreF; if (open) { x.moreF = false; x.cat = 'all'; x.status = 'all'; expReset(); } else x.moreF = true; render(); };
+  ACT['exp-allsrc'] = () => { UI.explorer.allSrc = !UI.explorer.allSrc; refreshLive(['exp-body']); };
+  const expReset = () => { UI.explorer.source = null; UI.explorer.limit = 10; UI.car.exp = 0; };
   CH.exp = (v, el) => { UI.explorer[el.dataset.key] = v; expReset(); refreshLive(['exp-body']); };
-  ACT['exp-src'] = (k) => { UI.explorer.source = k; UI.explorer.limit = 15; refreshLive(['exp-body']); const el = document.getElementById('exp-records'); if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' }); };
+  ACT['exp-src'] = (k) => { UI.explorer.source = k; UI.explorer.limit = 10; refreshLive(['exp-body']); const d = document.querySelector('.ex2-detail'); if (d) { d.classList.remove('pop'); void d.offsetWidth; d.classList.add('pop'); } };
   ACT['exp-order'] = (k) => { UI.explorer.sort = k; refreshLive(['exp-body']); };
-  ACT['exp-more'] = () => { UI.explorer.limit = (UI.explorer.limit || 15) + 30; refreshLive(['exp-body']); };
+  ACT['exp-more'] = () => { UI.explorer.limit = (UI.explorer.limit || 10) + 30; refreshLive(['exp-body']); };
   IN['exp-q'] = (v) => { UI.explorer.q = v; expReset(); clearTimeout(IN['exp-q'].t); IN['exp-q'].t = setTimeout(() => refreshLive(['exp-body']), 120); };
   ACT['exp-sort'] = (k) => { const x = UI.explorer; if (x.sort === k) x.dir *= -1; else { x.sort = k; x.dir = -1; } refreshLive(['exp-body']); };
   ACT['exp-clear-src'] = () => { UI.explorer.source = null; refreshLive(['exp-body']); };
@@ -986,7 +1112,7 @@
     const r = F().records.find((x) => x.id === id); if (!r) return '<p>Record not found.</p>';
     const c = D.CATEGORIES[r.category]; const f = r.calc ? E.factor(S.reg, r.calc.factorId) : null;
     const ver = f ? S.reg[f.id].versions.find((v) => v.v === r.calc.v) : null;
-    return '<div class="row between"><div><div class="eyebrow">Calculation record</div><h2 style="font-size:18px">' + esc(c.label) + ' · ' + esc(area(r.area).name) + '</h2></div><button type="button" class="icon-btn" data-act="close" aria-label="Close">' + ic('x') + '</button></div>' +
+    return '<div class="row between"><div><div class="eyebrow">Calculation record</div><h2 style="font-size:18px">' + esc(c.label) + ' — ' + esc(area(r.area).name) + '</h2></div><button type="button" class="icon-btn" data-act="close" aria-label="Close">' + ic('x') + '</button></div>' +
       '<div class="row">' + chip(r.status) + (r.calc && r.calc.kg == null ? chip('provisional') : chip('calculated')) + '<span class="chip st-imported">Scope ' + c.scope + (c.scope === 3 ? ' · ' + esc(D.S3_CATS[r.s3cat || c.s3cat] || '') : '') + '</span></div>' +
       '<dl class="kv"><dt>Reporting period</dt><dd>' + esc(D.monthLabel(r.month, true)) + '</dd><dt>Source ID</dt><dd class="mono">' + esc(r.stream) + '</dd><dt>Data source</dt><dd>' + esc(r.source) + '</dd>' +
       '<dt>Original value</dt><dd class="mono">' + n(r.origQty, 3) + ' ' + esc(r.origUnit) + '</dd><dt>Normalised activity</dt><dd class="mono">' + n(r.qty, 3) + ' ' + esc(c.unit) + '</dd>' + (r.notes ? '<dt>Notes</dt><dd>' + esc(r.notes) + '</dd>' : '') + '</dl>' +
@@ -1057,16 +1183,15 @@
   }
   async function startSession(acc) {
     STORE = KEY + ':' + acc.id;
-    if (G.CarbonOpsCloud && G.CarbonOpsCloud.ready) {
-      CAP.sample = acc.demo ? null : G.CarbonOpsCloud.sample;
-      CAP.images = !acc.demo; CAP.checked = true;
-    }
     if (G.CarbonOps.resetMonths) G.CarbonOps.resetMonths();
     S = load(acc);
     if (G.CarbonOpsCloud && G.CarbonOpsCloud.ready && !acc.demo) {
       try {
         const cloudState = await G.CarbonOpsCloud.loadWorkspace(acc.id);
-        if (cloudState && cloudState.v === 1 && cloudState.factories) S = cloudState;
+        if (cloudState && cloudState.v === 1 && cloudState.factories) {
+          if (E.migrateGrid(cloudState)) G.CarbonOpsCloud.saveWorkspace(acc.id, cloudState).catch((e) => console.error('CarbonOps cloud migration save failed:', e.message));
+          S = cloudState;
+        }
         else G.CarbonOpsCloud.saveWorkspace(acc.id, S).catch((e) => console.error('CarbonOps cloud save failed:', e.message));
       } catch (e) { console.error('Could not load the cloud workspace:', e.message); }
     }
@@ -1074,8 +1199,7 @@
     S.settings.user = Object.assign({}, S.settings.user, { name: acc.name, role: acc.role || 'Plant admin', email: acc.email || '' });
     UI.drawer = null; UI.modal = null; UI.profileOpen = false; UI.notifOpen = false; UI.sim.params = null; UI.advisor.turns = [];
     const hash = (location.hash || '').slice(1); UI.view = VIEWS[hash] ? hash : 'overview';
-    try { localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) { /* cloud save may still work */ }
-    render(); window.scrollTo(0, 0);
+    save(); render(); window.scrollTo(0, 0);
   }
   function endSession() {
     clearTimeout(saveTimer); try { if (S) localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) { /* ignore */ }
@@ -1085,7 +1209,7 @@
   }
 
   G.CarbonOps = {
-    boot, startSession, endSession, blankState, VIEWS, LIVE, ACT, CH, IN, CHART_CLICK, UI, CAP, get S() { return S; }, set S(v) { S = v; }, F, save, render, refreshLive, renderOverlay, toast, go, audit, derive, portfolio, ph, icons,
+    boot, startSession, endSession, appEnter, blankState, VIEWS, LIVE, ACT, CH, IN, CHART_CLICK, UI, CAP, get S() { return S; }, set S(v) { S = v; }, F, save, render, refreshLive, renderOverlay, toast, go, audit, derive, portfolio, ph, icons,
     theme, readPlan, carousel, CAT_PLAIN, n, tco2, inr, pct, ic, chip, qchip, ST, area, catLabel, catColor, areaColor, deltaHTML, alertList, offerFile, seedState, KEY, get VM() { return VM; },
     slider, clone
   };
