@@ -41,7 +41,9 @@
     if (STATE.mode === 'server') {
       let res;
       try {
-        res = await fetch('/api/ai', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ system: req.system, messages: req.messages, images: req.images, json: req.json, maxTokens: req.maxTokens, stream: !!onDelta }), signal: req.signal });
+        const headers = { 'content-type': 'application/json' };
+        if (G.CarbonOpsCloud && G.CarbonOpsCloud.ready) headers.Authorization = 'Bearer ' + await G.CarbonOpsCloud.token();
+        res = await fetch('/api/ai', { method: 'POST', headers, body: JSON.stringify({ system: req.system, messages: req.messages, images: req.images, json: req.json, maxTokens: req.maxTokens, stream: !!onDelta }), signal: req.signal });
       } catch (e) { throw aiErr(e && e.name === 'AbortError' ? 'cancelled' : 'network', e && e.name === 'AbortError' ? 'Stopped.' : 'Network error'); }
       if (!res.ok) { const body = await res.json().catch(() => ({})); throw aiErr(body.code || 'error', body.message || 'AI request failed'); }
       if (!onDelta) { const body = await res.json(); STATE.model = body.model; return body; }

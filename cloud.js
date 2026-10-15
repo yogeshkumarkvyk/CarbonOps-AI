@@ -119,5 +119,5 @@
     try { return JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, '')); }
     catch (_) { const err = new Error('Invalid JSON from model'); err.code = 'invalid_json'; throw err; }
   };
-  G.CarbonOpsCloud = { ready, client, loadWorkspace, saveWorkspace, sample };
+  G.CarbonOpsCloud = { ready, client, token, loadWorkspace, saveWorkspace, sample };
 })(window);

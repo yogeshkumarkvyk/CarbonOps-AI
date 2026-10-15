@@ -54,7 +54,11 @@
   let saveTimer = null;
   function save() {
     clearTimeout(saveTimer);
-    saveTimer = setTimeout(() => { try { if (S) localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) { /* ignore */ } }, 150);
+    saveTimer = setTimeout(() => {
+      try { if (S) localStorage.setItem(STORE, JSON.stringify(S)); } catch (e) { /* ignore */ }
+      const user = G.CarbonOpsCloud && G.CarbonOpsCloud.ready && G.CarbonOps.auth.current();
+      if (S && user && !user.demo) G.CarbonOpsCloud.saveWorkspace(user.id, S).catch((e) => console.error('CarbonOps cloud save failed:', e.message));
+    }, 400);
   }
   function F() { return S.factories[S.factoryId]; }
   function audit(action, detail) { F().audit.unshift({ at: E.nowStamp(), user: S.settings.user.name + ' (' + S.settings.user.role + ')', action, detail }); }
@@ -1249,10 +1253,19 @@
     initCaps();
     G.CarbonOps.auth.start();
   }
-  function startSession(acc) {
+  async function startSession(acc) {
     STORE = KEY + ':' + acc.id;
     if (G.CarbonOps.resetMonths) G.CarbonOps.resetMonths();
     S = load(acc);
+    if (G.CarbonOpsCloud && G.CarbonOpsCloud.ready && !acc.demo) {
+      try {
+        const cloudState = await G.CarbonOpsCloud.loadWorkspace(acc.id);
+        if (cloudState && cloudState.v === 1 && cloudState.factories) {
+          if (E.migrateGrid(cloudState)) G.CarbonOpsCloud.saveWorkspace(acc.id, cloudState).catch((e) => console.error('CarbonOps cloud migration save failed:', e.message));
+          S = cloudState;
+        } else G.CarbonOpsCloud.saveWorkspace(acc.id, S).catch((e) => console.error('CarbonOps cloud save failed:', e.message));
+      } catch (e) { console.error('Could not load the cloud workspace:', e.message); }
+    }
     if (!S.factories[S.factoryId]) S.factoryId = 'f1';
     S.settings.user = Object.assign({}, S.settings.user, { name: acc.name, role: acc.role || 'Plant admin', email: acc.email || '' });
     UI.drawer = null; UI.modal = null; UI.profileOpen = false; UI.notifOpen = false; UI.sim.params = null; UI.advisor.turns = [];

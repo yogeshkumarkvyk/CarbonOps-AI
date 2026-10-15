@@ -15,9 +15,40 @@ function providerConfig(env) {
   return { key: env.GEMINI_API_KEY, model: env.GEMINI_MODEL || MODEL_FALLBACK };
 }
 
-// Best-effort per-isolate protection for the public, browser-local account version.
-// Cloudflare isolates are ephemeral, so this complements request-size and origin checks;
-// Gemini's Free-tier quota remains the hard provider-side limit.
+async function authorizeUser(request, env) {
+  const authorization = request.headers.get('Authorization') || '';
+  if (!authorization.startsWith('Bearer ')) return { error: errorResponse(401, 'Sign in to use the hosted AI.', 'unauthorized') };
+  if (!env.SUPABASE_URL || !env.SUPABASE_ANON_KEY || !env.SUPABASE_SERVICE_ROLE_KEY) {
+    return { error: errorResponse(503, 'Account and AI services are not configured.', 'not_configured') };
+  }
+  const base = env.SUPABASE_URL.replace(/\/$/, '');
+  let userResponse;
+  try {
+    userResponse = await fetch(base + '/auth/v1/user', {
+      headers: { Authorization: authorization, apikey: env.SUPABASE_ANON_KEY }
+    });
+  } catch (_) { return { error: errorResponse(502, 'Could not verify your account. Try again.', 'auth_unavailable') }; }
+  if (!userResponse.ok) return { error: errorResponse(401, 'Your session expired. Sign in again.', 'unauthorized') };
+  let user;
+  try { user = await userResponse.json(); }
+  catch (_) { return { error: errorResponse(401, 'Your session could not be verified.', 'unauthorized') }; }
+  return { userId: user.id, base };
+}
+
+async function takeUserSlot(userId, base, env) {
+  const serviceKey = env.SUPABASE_SERVICE_ROLE_KEY;
+  try {
+    const response = await fetch(base + '/rest/v1/rpc/take_carbonops_ai_slot', {
+      method: 'POST',
+      headers: { apikey: serviceKey, Authorization: 'Bearer ' + serviceKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ p_user_id: userId, p_limit: 30 })
+    });
+    if (!response.ok) return { error: errorResponse(503, 'AI request limits are unavailable. Try again later.', 'quota_unavailable') };
+    return { allowed: await response.json() === true };
+  } catch (_) { return { error: errorResponse(503, 'AI request limits are unavailable. Try again later.', 'quota_unavailable') }; }
+}
+
+// Best-effort per-isolate IP protection complements the atomic per-user database quota.
 const requestBuckets = new Map();
 function overLimit(ip) {
   const now = Date.now();
@@ -78,6 +109,12 @@ export async function onRequestPost({ request, env }) {
       if (new URL(origin).origin !== new URL(request.url).origin) return errorResponse(403, 'Cross-site requests are not allowed.', 'forbidden');
     } catch (_) { return errorResponse(403, 'Cross-site requests are not allowed.', 'forbidden'); }
   }
+
+  const auth = await authorizeUser(request, env);
+  if (auth.error) return auth.error;
+  const slot = await takeUserSlot(auth.userId, auth.base, env);
+  if (slot.error) return slot.error;
+  if (!slot.allowed) return errorResponse(429, 'You have reached the hourly AI request limit. Try again next hour.', 'rate_limited');
 
   const ip = request.headers.get('CF-Connecting-IP') || 'unknown';
   if (overLimit(ip)) return errorResponse(429, 'This network has reached the hourly AI request limit. Try again later.', 'rate_limited');
