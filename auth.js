@@ -180,7 +180,7 @@
         '<main class="lp3-center"><div class="lp-card">' + corners + form + '</div></main>' +
         '<p class="lp-hint3d">' + ic('move-3d') + '<span>Drag to spin · click a glowing site</span></p>' +
         '<div class="lp-hud" aria-live="off"><div class="lp-hud-row"><b><span id="lp-hud-n">' + n3 + '</span><small> / ' + tot + '</small></b><span>sites on track</span></div><div class="lp-hud-track"><i id="lp-hud-bar" style="width:' + (n3 / (tot || 1) * 100) + '%"></i></div><span class="lp-hud-sim">Simulated sites</span></div>' +
-        '<footer class="lp-foot lp3-foot"><span>' + ic('lock') + ' Accounts stay in this browser</span><span aria-hidden="true">·</span><button type="button" data-act="au-tab" data-arg="privacy">Privacy</button><span aria-hidden="true">·</span><button type="button" data-act="au-tab" data-arg="terms">Terms</button><span aria-hidden="true">·</span><button type="button" data-act="au-tab" data-arg="support">Help</button></footer></div>';
+        '<footer class="lp-foot lp3-foot"><span>' + ic('lock') + (cloudReady() ? ' Secure sign-in and private workspace storage' : ' Accounts stay in this browser') + '</span><span aria-hidden="true">·</span><button type="button" data-act="au-tab" data-arg="privacy">Privacy</button><span aria-hidden="true">·</span><button type="button" data-act="au-tab" data-arg="terms">Terms</button><span aria-hidden="true">·</span><button type="button" data-act="au-tab" data-arg="support">Help</button></footer></div>';
     }
     return '<div class="lp' + (first ? ' first' : '') + (is3d ? ' is3d' : '') + '">' +
       '<section class="lp-brand" aria-label="About CarbonOps AI"><div class="lp-brand-in">' +
