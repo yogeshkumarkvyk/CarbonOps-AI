@@ -48,7 +48,7 @@
   function spotsHTML(vm) {
     const a = vm.agg, b = vm.aggCmp;
     const by = {};
-    vm.recs.filter(OPEN).forEach((r) => { const s = by[r.area] = by[r.area] || { area: r.area, recs: [], save: 0, kg: 0 }; s.recs.push(r); s.save += (r.est && r.est.savings) || 0; s.kg += (r.est && r.est.kg) || 0; });
+    vm.recs.filter((r) => OPEN(r) && r.area !== 'site').forEach((r) => { const s = by[r.area] = by[r.area] || { area: r.area, recs: [], save: 0, kg: 0 }; s.recs.push(r); s.save += (r.est && r.est.savings) || 0; s.kg += (r.est && r.est.kg) || 0; });
     const list = Object.values(by).sort((x, y) => (y.save + y.kg * 5) - (x.save + x.kg * 5)).slice(0, 3);
     if (!list.length) return '';
     const months = vm.months.slice(-10);
@@ -124,34 +124,211 @@
   }
 
 
-  // ---- actions for a new (blank) workspace, built from the person's own records ----
-  // Cut share and typical payback are general rules of thumb, labelled as such; the person can enter their own cost.
+  // ---- actions for your own workspace, diagnosed from each room's own monthly data ----
+  // Each room + source is checked for a pattern (energy per unit creeping up, load that never drops, a summer or
+  // monsoon peak, repeated refrigerant top-ups, ...). The pattern picks the idea, and the "why" quotes that room's numbers.
+  // Cut shares and paybacks are general rules of thumb per idea, labelled as such; the person can enter their own cost.
+  const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+  const monName = (m) => MON[Number(String(m).slice(5, 7)) - 1] + ' ' + String(m).slice(0, 4);
+  const pc = (x) => Math.round(Math.abs(x) * 100) + '%';
+  const sgn = (x) => (x >= 0 ? '+' : '−') + pc(x);
+  const clamp = (x, lo, hi) => Math.max(lo, Math.min(hi, x));
+  const avg = (a) => a.length ? a.reduce((t, v) => t + v, 0) / a.length : 0;
+  function corr(x, y) {
+    const n2 = x.length; if (n2 < 4) return 0; const mx = avg(x), my = avg(y); let a = 0, b = 0, c = 0;
+    for (let i = 0; i < n2; i++) { a += (x[i] - mx) * (y[i] - my); b += (x[i] - mx) ** 2; c += (y[i] - my) ** 2; }
+    return b && c ? a / Math.sqrt(b * c) : 0;
+  }
+  // Monthly series for every room + source over the 12 months up to the latest month with data.
+  function diagnose() {
+    const f = F(); const recs = f.records;
+    const all = [...new Set(recs.map((r) => r.month))].sort(); if (!all.length) return null;
+    const last = all[all.length - 1]; const months = [];
+    for (let i = 11; i >= 0; i--) { const d = new Date(last + '-01T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() - i); months.push(d.toISOString().slice(0, 7)); }
+    const idx = {}; months.forEach((m, i) => { idx[m] = i; });
+    const prod = months.map(() => 0); const G2 = {};
+    recs.forEach((r) => {
+      const i = idx[r.month]; if (i == null) return;
+      if (r.category === 'production') { prod[i] += Number(r.qty) || 0; return; }
+      const kg = r.calc && r.calc.kg; if (kg == null) return;
+      const k = r.area + '|' + r.category;
+      const g = G2[k] = G2[k] || { area: r.area, category: r.category, q: months.map(() => 0), kg: months.map(() => 0), cost: months.map(() => 0), costN: 0 };
+      g.q[i] += Number(r.qty) || 0; g.kg[i] += kg; if (r.cost != null) { g.cost[i] += r.cost; g.costN++; }
+    });
+    const hasProd = prod.filter((v) => v > 0).length >= 6;
+    let siteKg = 0, elecKg = 0, elecKWh = 0, elecCost = 0;
+    const stats = Object.values(G2).map((g) => {
+      const on = g.q.map((v, i) => v > 0 ? i : -1).filter((i) => i >= 0); const n2 = on.length || 1;
+      const qs = on.map((i) => g.q[i]); const mean = avg(qs);
+      // Refrigerant top-ups are events, not a monthly flow: count what was actually added instead of scaling it up.
+      const yr = g.category === 'refrigerant' ? 1 : 12 / n2;
+      const kgY = g.kg.reduce((t, v) => t + v, 0) * yr, costY = g.costN ? g.cost.reduce((t, v) => t + v, 0) * yr : null, qY = qs.reduce((t, v) => t + v, 0) * yr;
+      let mi = on[0], ma = on[0]; on.forEach((i) => { if (g.q[i] < g.q[mi]) mi = i; if (g.q[i] > g.q[ma]) ma = i; });
+      const sd = Math.sqrt(avg(qs.map((v) => (v - mean) ** 2)));
+      const sorted = qs.slice().sort((a, b) => a - b); const med = sorted[Math.floor(sorted.length / 2)] || 0;
+      const calM = (i) => Number(months[i].slice(5, 7));
+      const sum = on.filter((i) => [4, 5, 6].includes(calM(i))).map((i) => g.q[i]), win = on.filter((i) => [12, 1, 2].includes(calM(i))).map((i) => g.q[i]);
+      const first3 = on.slice(0, 3), last3 = on.slice(-3);
+      const per = (set) => hasProd ? avg(set.map((i) => g.q[i] / (prod[i] || 1))) : avg(set.map((i) => g.q[i]));
+      const rise = n2 >= 6 ? per(last3) / (per(first3) || 1) - 1 : 0;
+      const prodChg = hasProd && n2 >= 6 ? avg(last3.map((i) => prod[i])) / (avg(first3.map((i) => prod[i])) || 1) - 1 : 0;
+      let lowP = null; if (hasProd) on.forEach((i) => { if (lowP == null || prod[i] < prod[lowP]) lowP = i; });
+      const st = { area: g.area, category: g.category, n: n2, kgY, costY, qY, mean, base: mean ? g.q[mi] / mean : 0, cv: mean ? sd / mean : 0, spike: med ? g.q[ma] / med : 0,
+        seas: sum.length && win.length && avg(win) > 0 ? avg(sum) / avg(win) : null, rise, prodChg,
+        corr: hasProd ? corr(on.map((i) => g.q[i]), on.map((i) => prod[i])) : 0,
+        minM: months[mi], maxM: months[ma], maxQ: g.q[ma], minQ: g.q[mi], perNow: per(last3), perThen: per(first3),
+        lowProdM: lowP != null ? months[lowP] : null, lowProdDrop: lowP != null ? 1 - prod[lowP] / (avg(on.map((i) => prod[i])) || 1) : 0, lowProdUse: lowP != null && mean ? g.q[lowP] / mean - 1 : 0,
+        events: on.map((i) => months[i]) };
+      siteKg += kgY; if (g.category === 'electricity') { elecKg += kgY; elecKWh += qY; elecCost += costY || 0; }
+      return st;
+    });
+    stats.forEach((s) => { s.share = siteKg ? s.kgY / siteKg : 0; s.elecShare = s.category === 'electricity' && elecKWh ? s.qY / elecKWh : 0; });
+    return { months, stats, siteKg, elecKg, elecKWh, elecCost, hasProd };
+  }
+
+  const kindOf = (id) => (A.area(id).kind || 'Area');
+  const nameHas = (id, re) => re.test(String(A.area(id).name || '').toLowerCase());
+  const isComp = (id) => nameHas(id, /compress|air plant/), isGen = (id) => nameHas(id, /generator|\bdg\b|genset|power house/) || id === 'site';
+  const isCold = (id) => kindOf(id) === 'Cold room' || nameHas(id, /cool|chill|refrig|cold/);
+  const isOffice = (id) => kindOf(id) === 'Support' || nameHas(id, /office|canteen|admin/);
+  const isStore = (id) => kindOf(id) === 'Storage' || nameHas(id, /store|warehouse|storage/);
+  const isLog = (id) => kindOf(id) === 'Logistics' || nameHas(id, /transport|logistic|dispatch|fleet|truck/);
+  const kwh = (v) => n(v, 0) + ' kWh';
+  // Ideas: when(st) returns a score (0 = does not apply). pct may depend on the data. pay = typical payback in months.
+  const IDEAS = [
+    // ----- electricity -----
+    { key: 'idle', cats: ['electricity'], ease: 1, pay: 5, when: (s) => !isComp(s.area) && !isCold(s.area) && s.n >= 6 && s.rise > 0.05 && s.rise - s.prodChg > 0.04 ? 4 + s.rise * 10 : 0, pct: (s) => clamp(s.rise * 0.8 + 0.03, 0.05, 0.2),
+      t: (ar) => 'Stop idle running in ' + ar,
+      why: (s, ar, D2) => ar + ' now uses ' + n(s.perNow, D2.hasProd ? 3 : 0) + (D2.hasProd ? ' kWh per unit made' : ' kWh a month') + ', ' + pc(s.rise) + ' more than at the start of the year, while output changed ' + sgn(s.prodChg) + '. Machines are probably left running between jobs and after shifts.',
+      how: 'Fit auto-shutdown timers on machines idle for more than 10 minutes, add a shift-end switch-off round, and read the meter at night and on Sundays to see what is still running.' },
+    { key: 'air', cats: ['electricity'], ease: 1, pay: 4, when: (s) => isComp(s.area) || (kindOf(s.area) === 'Utility' && s.base > 0.85 && s.corr < 0.6 && !isGen(s.area)) ? 6 : 0, pct: () => 0.2,
+      t: (ar) => 'Fix air leaks and lower the pressure in ' + ar,
+      why: (s, ar) => 'Even in its quietest month (' + monName(s.minM) + ') ' + ar + ' used ' + pc(s.base) + ' of its average' + (s.lowProdM && s.lowProdDrop > 0.05 ? ', and when output fell ' + pc(s.lowProdDrop) + ' in ' + monName(s.lowProdM) + ' its use moved only ' + sgn(s.lowProdUse) : '') + '. That points to leaks and a higher pressure than needed, running day and night.',
+      how: 'Do an ultrasonic leak survey and fix what it finds, lower the header pressure by 0.5–1 bar, switch the compressors off at weekends, and add a sequencer if there are several machines.' },
+    { key: 'summer', cats: ['electricity'], ease: 1, pay: 7, when: (s) => isCold(s.area) && s.seas > 1.15 ? 5 + s.seas : 0, pct: (s) => clamp((s.seas - 1) * 0.25, 0.06, 0.14),
+      t: (ar) => 'Keep summer heat out of ' + ar,
+      why: (s, ar) => ar + ' used ' + n(s.maxQ / (s.minQ || 1), 1) + '× more electricity in ' + monName(s.maxM) + ' than in ' + monName(s.minM) + '. Warm air coming in through open doors and condensers working in the heat drive that summer peak.',
+      how: 'Fit strip curtains and door-open alarms, clean the condenser coils before April, shade the condensers from direct sun, and check door seals and defrost timing.' },
+    { key: 'coldplant', cats: ['electricity'], ease: 2, pay: 22, when: (s) => isCold(s.area) ? 3 : 0, pct: () => 0.14,
+      t: (ar) => 'Upgrade the ' + ar + ' plant: EC fans and floating head pressure',
+      why: (s, ar) => ar + ' is ' + pc(s.elecShare) + ' of the site\'s electricity (' + kwh(s.qY) + ' a year) and still runs at ' + pc(s.base) + ' of its average load in the coolest month.',
+      how: 'Replace old evaporator fans with EC fans, let the condensing pressure float down in cooler months, and add a variable-speed drive on the refrigeration compressor.' },
+    { key: 'ac', cats: ['electricity'], ease: 1, pay: 6, when: (s) => isOffice(s.area) && s.seas > 1.1 ? 4 + s.seas : 0, pct: (s) => clamp((s.seas - 1) * 0.35, 0.08, 0.2),
+      t: (ar) => 'Set the AC in ' + ar + ' to 25 °C and add timers',
+      why: (s, ar) => ar + ' uses ' + pc(s.seas - 1) + ' more electricity in summer than in winter (peak in ' + monName(s.maxM) + '), so most of its load is air-conditioning.',
+      how: 'Set thermostats to 25 °C (the BEE default is 24 °C), put AC and lights on timers that end with the shift, and replace old units with 5-star inverter ACs as they fail.' },
+    { key: 'led', cats: ['electricity'], ease: 1, pay: 16, when: (s) => (isStore(s.area) || isLog(s.area) || kindOf(s.area) === 'Area') && !isComp(s.area) && !isCold(s.area) && s.cv < 0.07 && s.n >= 6 ? (isStore(s.area) ? 5 : 3.5) : 0, pct: () => 0.45,
+      t: (ar) => 'LED high-bays with motion sensors in ' + ar,
+      why: (s, ar) => ar + ' draws an almost constant ' + kwh(s.mean) + ' a month: it changed less than ' + pc(Math.max(0.03, s.cv * 2)) + ' all year, whatever the season or output. A steady load like that is mostly lighting left on.',
+      how: 'Replace metal-halide or tube lights with LED high-bays, add motion sensors in aisles and racks, and use daylight from translucent roof sheets where there are any.' },
+    { key: 'lab', cats: ['electricity'], ease: 1, pay: 6, when: (s) => kindOf(s.area) === 'Laboratory' ? 4 : 0, pct: () => 0.15,
+      t: (ar) => 'Switch off lab equipment out of hours in ' + ar,
+      why: (s, ar) => ar + ' keeps ' + pc(s.base) + ' of its average load even in its quietest month: ovens, chambers and fume hoods left on overnight.',
+      how: 'Agree which instruments may be switched off at night, close fume-hood sashes when not in use, and put drying ovens on timers.' },
+    { key: 'motors', cats: ['electricity'], ease: 2, pay: 26, when: (s) => kindOf(s.area) === 'Process' && s.corr > 0.75 && Math.abs(s.rise) <= 0.05 ? 3 + s.elecShare : 0, pct: () => 0.08,
+      t: (ar) => 'Premium-efficiency motors and drives in ' + ar,
+      why: (s, ar) => ar + '\'s electricity rises and falls with output (it tracked production month by month), so little is wasted while idle. What is left to save is in the motors and drives, which take ' + pc(s.elecShare) + ' of the site\'s electricity.',
+      how: 'Replace the largest motors (spindles, pumps, fans, conveyors) with IE4 motors as they fail, and fit variable-speed drives where the load varies.' },
+    { key: 'vfd', cats: ['electricity'], ease: 2, pay: 18, when: (s) => kindOf(s.area) === 'Utility' && !isComp(s.area) && !isGen(s.area) ? 2 : 0, pct: () => 0.15,
+      t: (ar) => 'Variable-speed drives on pumps and fans in ' + ar,
+      why: (s, ar) => ar + ' uses ' + kwh(s.qY) + ' a year and its load stays at ' + pc(s.base) + '–100% of average month to month: pumps and fans running at full speed when the process does not need it.',
+      how: 'Fit VFDs on the largest pumps and fans, control them on pressure or temperature, and trim oversized impellers.' },
+    { key: 'timers', cats: ['electricity'], ease: 1, pay: 6, when: (s) => s.elecShare > 0.03 ? 1 : 0, pct: () => 0.06,
+      t: (ar) => 'Switch-off routine and timers in ' + ar,
+      why: (s, ar) => ar + ' used ' + kwh(s.qY) + ' in the last 12 months (' + pc(s.elecShare) + ' of the site\'s electricity), with its lowest month at ' + pc(s.base) + ' of average.',
+      how: 'Walk the area at the end of each shift, put lighting and ventilation on timers, and label switches so the last person out knows what to turn off.' },
+    // ----- diesel -----
+    { key: 'dg', cats: ['diesel'], ease: 1, pay: 5, when: (s) => isGen(s.area) || s.spike > 1.6 ? 5 + s.spike : 0, pct: () => 0.3,
+      t: (ar) => 'Cut generator hours at ' + ar,
+      why: (s, ar) => 'Diesel use jumps to ' + n(s.maxQ, 0) + ' L in ' + monName(s.maxM) + ', ' + n(s.spike, 1) + '× a normal month. The generator is covering grid outages in the monsoon, often lightly loaded.',
+      how: 'Log every outage and take it up with the DISCOM, add a UPS or battery for short dips so the generator does not start, and keep its load above 60% whenever it runs.' },
+    { key: 'forklift', cats: ['diesel'], ease: 2, pay: 34, when: (s) => isStore(s.area) ? 4 : 0, pct: () => 0.65,
+      t: (ar) => 'Switch the diesel forklifts in ' + ar + ' to electric',
+      why: (s, ar) => ar + ' burns ' + n(s.qY, 0) + ' L of diesel a year, rising and falling with output' + (s.corr ? ' (correlation ' + n(s.corr, 2) + ')' : '') + ': that is material handling, not a generator.',
+      how: 'Replace forklifts at the end of their life with lithium-ion electric ones, charge them off-peak, and start with the busiest truck.' },
+    { key: 'fleet', cats: ['diesel', 'petrol'], ease: 1, pay: 3, when: (s) => isLog(s.area) || !isGen(s.area) ? 3 + Math.max(0, s.rise) * 10 : 0, pct: (s) => clamp(0.07 + Math.max(0, s.rise) * 0.5, 0.07, 0.15),
+      t: (ar) => 'Plan routes and cut idling for the ' + ar + ' vehicles',
+      why: (s, ar) => ar + ' vehicles use ' + n(s.qY, 0) + ' L of fuel a year' + (s.rise > 0.03 ? ', and fuel per unit shipped is up ' + pc(s.rise) + ' over the year' : '') + '.',
+      how: 'Use route planning, switch engines off while loading, check tyre pressures weekly, and train drivers in steady driving.' },
+    // ----- process heat -----
+    { key: 'burner', cats: ['lpg', 'natural_gas'], ease: 1, pay: 4, when: (s) => !isOffice(s.area) && s.rise > 0.05 ? 5 + s.rise * 10 : 0, pct: (s) => clamp(s.rise * 0.7, 0.05, 0.12),
+      t: (ar) => 'Tune the burners in ' + ar,
+      why: (s, ar, D2) => ar + ' now burns ' + n(s.perNow * (D2.hasProd ? 1000 : 1), 1) + (D2.hasProd ? ' kg per 1,000 units made' : ' kg a month') + ', ' + pc(s.rise) + ' more than at the start of the year. Burners drift out of tune and waste fuel.',
+      how: 'Get a flue-gas analysis and burner tune-up every six months, fit oxygen trim on the largest burner, and fix steam and condensate leaks.' },
+    { key: 'heatrec', cats: ['lpg', 'natural_gas'], ease: 2, pay: 20, when: (s) => !isOffice(s.area) ? 3 : 0, pct: () => 0.1,
+      t: (ar) => 'Recover waste heat and insulate hot lines in ' + ar,
+      why: (s, ar) => ar + ' uses ' + n(s.qY, 0) + ' kg of fuel a year' + (s.seas && s.seas < 0.97 ? ', ' + pc(1 / s.seas - 1) + ' more in winter than in summer: heat is being lost from hot surfaces' : '') + '.',
+      how: 'Insulate bare pipes, valves and tank tops, and fit an economiser to pre-heat feed water or combustion air from the flue gas.' },
+    { key: 'kitchen', cats: ['lpg', 'natural_gas'], ease: 1, pay: 4, when: (s) => isOffice(s.area) ? 4 : 0, pct: () => 0.15,
+      t: (ar) => 'Efficient burners and cooking in ' + ar,
+      why: (s, ar) => ar + ' uses ' + n(s.qY, 0) + ' kg of LPG a year, at a steady rate every month.',
+      how: 'Switch to high-efficiency burners, use pressure cookers and lids, and fix leaking regulators and hoses.' },
+    // ----- other sources -----
+    { key: 'leak', cats: ['refrigerant'], ease: 1, pay: 2, when: () => 6, pct: () => 0.75,
+      t: (ar) => 'Find and fix the refrigerant leak in ' + ar,
+      why: (s, ar) => ar + ' was topped up ' + s.events.length + ' time' + (s.events.length === 1 ? '' : 's') + ' in the year (' + s.events.map(monName).join(', ') + '), ' + n(s.qY, 1) + ' kg in all. Every kilogram added had leaked out, and R-410A warms the climate about 2,000 times more than CO₂.',
+      how: 'Have the system leak-tested with an electronic detector, fix the leaks found, keep a top-up logbook, and re-check every quarter.' },
+    { key: 'rail', cats: ['freight_road'], ease: 3, pay: 8, when: () => 4, pct: () => 0.3,
+      t: (ar) => 'Move long-distance loads from ' + ar + ' to rail',
+      why: (s, ar) => 'Road freight from ' + ar + ' is ' + n(s.qY / 1000, 0) + ' thousand tonne-km a year (' + tco2(s.kgY) + ' t CO₂e). For routes over 500 km, rail emits about a quarter as much per tonne-km.',
+      how: 'List the lanes over 500 km, ask the transporter for a rail or container-train quote on the biggest one, and fill trucks fully on the rest.' },
+    { key: 'segregate', cats: ['waste_landfill'], ease: 1, pay: 4, when: () => 4, pct: () => 0.4,
+      t: (ar) => 'Separate recyclables before they go to landfill from ' + ar,
+      why: (s, ar) => ar + ' sends ' + n(s.qY, 0) + ' t of waste to landfill a year, rising and falling with output. Much of it is usually packaging, metal and plastic that recyclers will collect.',
+      how: 'Put colour-coded bins at each line, bale cardboard and plastic, sell metal scrap separately, and track landfill tonnes every month.' },
+    { key: 'yield', cats: ['steel', 'aluminium'], ease: 3, pay: 10, when: () => 4, pct: () => 0.05,
+      t: (ar) => 'Cut metal offcuts and scrap in ' + ar,
+      why: (s, ar) => ar + ' buys ' + n(s.qY, 0) + ' t of metal a year (' + tco2(s.kgY) + ' t CO₂e, ' + pc(s.share) + ' of the site)' + (s.rise > 0.03 ? ', and purchases per unit made are up ' + pc(s.rise) + ' this year' : '') + '.',
+      how: 'Nest cutting layouts to reduce offcuts, track scrap per batch, and ask suppliers for steel or aluminium with recycled content.' }
+  ];
+  // Fallback for sources no idea covers (kept from the earlier rule-of-thumb list).
   const GEN = {
-    electricity: { pct: 0.12, pay: 12, ease: 1, t: (ar) => 'Cut wasted electricity in ' + ar, how: (ar, kind) => (kind ? kind + ': ' : '') + 'switch off what runs when nobody is working, fix compressed-air leaks and set timers.' },
-    diesel: { pct: 0.2, pay: 6, ease: 1, t: (ar) => 'Run the generator less · ' + ar, how: () => 'Find out why the grid drops and avoid running the generator lightly loaded.' },
     petrol: { pct: 0.1, pay: 6, ease: 1, t: (ar) => 'Plan vehicle trips better · ' + ar, how: () => 'Cut empty running and service the vehicles.' },
-    lpg: { pct: 0.08, pay: 18, ease: 2, t: (ar) => 'Tune burners and insulate · ' + ar, how: () => 'Tune the burner, insulate hot pipes and tanks, recover heat from exhaust.' },
-    natural_gas: { pct: 0.08, pay: 18, ease: 2, t: (ar) => 'Tune burners and insulate · ' + ar, how: () => 'Tune the burner, insulate hot pipes and tanks, recover heat from exhaust.' },
-    refrigerant: { pct: 0.5, pay: 8, ease: 1, t: (ar) => 'Find and fix refrigerant leaks · ' + ar, how: () => 'Every kilogram topped up has leaked out; a leak check usually finds it.' },
-    freight_road: { pct: 0.1, pay: 3, ease: 2, t: (ar) => 'Fill trucks and combine deliveries · ' + ar, how: () => 'Fill trucks fully, combine trips, move long routes to rail.' },
-    waste_landfill: { pct: 0.3, pay: 6, ease: 1, t: (ar) => 'Separate waste from landfill · ' + ar, how: () => 'Separate scrap and recyclables so less goes to landfill.' },
-    steel: { pct: 0.05, pay: 10, ease: 3, t: (ar) => 'Cut steel scrap · ' + ar, how: () => 'Cut offcuts and scrap, and ask suppliers for lower-carbon material.' },
-    aluminium: { pct: 0.05, pay: 10, ease: 3, t: (ar) => 'Cut aluminium scrap · ' + ar, how: () => 'Cut offcuts and ask suppliers for recycled aluminium.' }
+    freight_rail: { pct: 0.05, pay: 6, ease: 2, t: (ar) => 'Fill wagons and combine shipments · ' + ar, how: () => 'Fill wagons fully and combine shipments.' },
+    waste_recycling: null
   };
   function genRecs(vm) {
     const f = F(); f.planCost = f.planCost || {}; f.planState = f.planState || {};
-    const withData = vm.period.months.filter((m) => vm.agg.byMonth[m] && vm.agg.byMonth[m].total > 0).length || 1, yr = 12 / withData;
-    const src = Object.values(vm.agg.bySource || {}).filter((x) => x.kg > 0 && GEN[x.category]).sort((a, b) => b.kg - a.kg).slice(0, 10);
-    return src.map((x) => {
-      const g = GEN[x.category]; const ar = A.area(x.area); const id = 'g:' + x.area + ':' + x.category;
-      const kg = x.kg * yr * g.pct, savings = x.cost * yr * g.pct;
-      const own = f.planCost[id]; const cost = own != null ? own : (savings > 0 ? savings * g.pay / 12 : null);
+    const D2 = diagnose(); if (!D2) return [];
+    const used = new Set(); const out = [];
+    const make = (s, idea) => {
+      const ar = A.area(s.area).name; const id = 'g:' + s.area + ':' + s.category + ':' + idea.key;
+      const pct = idea.pct(s); const kg = s.kgY * pct, savings = s.costY != null ? s.costY * pct : 0;
+      const own = f.planCost[id]; const cost = own != null ? own : (savings > 0 ? savings * idea.pay / 12 : null);
       const st = f.planState[id] || {};
-      return { id, gen: true, own: own != null, title: g.t(ar.name), area: x.area, category: x.category, status: st.status || 'Suggested', ease: g.ease,
-        problem: catLabel(x.category) + ' here is ' + tco2(x.kg) + ' t CO₂e in ' + vm.period.label + '.',
-        def: { intervention: g.how(ar.name, ar.kind) }, pct: g.pct, pay: g.pay,
-        est: { kg, savings: savings > 0 ? savings : null, cost: savings > 0 ? cost : null, insufficient: savings > 0 ? null : 'No rupee cost recorded for this source.' } };
+      used.add(idea.key);
+      out.push({ id, gen: true, own: own != null, key: idea.key, title: idea.t(ar), area: s.area, category: s.category, status: st.status || 'Suggested', ease: idea.ease,
+        problem: idea.why(s, ar, D2), def: { intervention: idea.how }, pct, pay: idea.pay,
+        basis: n(s.kgY / 1000, 1) + ' t CO₂e a year from ' + catLabel(s.category).toLowerCase() + (s.costY ? ' costing ' + inr(s.costY) + ' a year' : '') + (s.n < 12 ? ' (scaled up from ' + s.n + ' month' + (s.n === 1 ? '' : 's') + ' of data)' : ''),
+        est: { kg, savings: savings > 0 ? savings : null, cost: savings > 0 ? cost : null, insufficient: savings > 0 ? null : 'No rupee cost recorded for this source.' } });
+    };
+    // Biggest sources first, so they get first pick of the ideas; a later room with the same pattern gets the next-best idea.
+    D2.stats.filter((s) => s.kgY > 0 && s.category !== 'waste_recycling').sort((a, b) => b.kgY - a.kgY).forEach((s) => {
+      const cands = IDEAS.filter((i) => i.cats.includes(s.category)).map((i) => ({ i, sc: i.when(s) })).filter((x) => x.sc > 0).sort((a, b) => b.sc - a.sc);
+      if (!cands.length) {
+        const g = GEN[s.category]; if (!g) return;
+        make(s, { key: 'gen-' + s.category, ease: g.ease, pay: g.pay, pct: () => g.pct, t: g.t, why: (x, ar) => catLabel(x.category) + ' in ' + ar + ' is ' + tco2(x.kgY) + ' t CO₂e a year.', how: g.how() });
+        return;
+      }
+      // Prefer an idea not shown yet, but only if it still fits nearly as well; otherwise repeat the right idea for this room.
+      const pick = cands.find((x) => !used.has(x.i.key) && x.sc >= cands[0].sc * 0.6) || cands[0];
+      if (s.category === 'electricity' && s.elecShare < 0.03 && pick.i.key === 'timers') return; // too small to bother
+      if (s.category === 'electricity' && used.has(pick.i.key) && s.elecShare < 0.04) return; // same idea already shown for a bigger room
+      make(s, pick.i);
+      if (s.share >= 0.1) { const second = cands.find((x) => x.i !== pick.i && !used.has(x.i.key) && x.i.key !== 'timers'); if (second) make(s, second.i); }
     });
+    // One site-wide idea: rooftop solar, sized from the site's own electricity.
+    if (D2.elecKWh > 0 && D2.elecKg / (D2.siteKg || 1) > 0.3) {
+      const share = 0.25, kWp = D2.elecKWh * share / 1400;
+      const id = 'g:site:electricity:solar'; const own = f.planCost[id]; const st = f.planState[id] || {};
+      const savings = D2.elecCost * share; const cost = own != null ? own : kWp * 45000;
+      out.push({ id, gen: true, own: own != null, key: 'solar', title: 'Rooftop solar of about ' + n(kWp, 0) + ' kWp', area: 'site', category: 'electricity', status: st.status || 'Suggested', ease: 2,
+        problem: 'Grid electricity is ' + pc(D2.elecKg / D2.siteKg) + ' of the site\'s emissions (' + tco2(D2.elecKg) + ' t CO₂e a year). A rooftop system of about ' + n(kWp, 0) + ' kWp would make around a quarter of it.',
+        def: { intervention: 'Get a structural check of the largest roofs and two vendor quotes for a net-metered system; check the state net-metering limit first.' }, pct: share, pay: savings > 0 ? Math.round(cost / savings * 12) : null,
+        basis: n(D2.elecKWh, 0) + ' kWh of grid electricity a year; about 1,400 kWh per kWp a year in Telangana; about ₹45,000 per kWp installed',
+        est: { kg: D2.elecKg * share, savings: savings > 0 ? savings : null, cost: savings > 0 ? cost : null, insufficient: savings > 0 ? null : 'No rupee cost recorded for electricity.' } });
+    }
+    return out.sort((a, b) => (b.est.kg || 0) - (a.est.kg || 0)).slice(0, 18);
   }
   function genDrawer(id) {
     const r = ((A.VM && A.VM.__plan) || genRecs(A.VM)).find((x) => x.id === id) || genRecs(A.VM).find((x) => x.id === id); if (!r) return '<p>Not found.</p>';
@@ -161,14 +338,14 @@
       '<div><h2 class="dr-title">' + esc(r.title) + '</h2><p class="small muted" style="margin:4px 0 0">' + esc(A.area(r.area).name) + ' · ' + esc(catLabel(r.category)) + ' · Effort: ' + EASE[r.ease] + '</p></div>' +
       '<div class="dr-big"><div><span>Cuts</span><b class="good-t">' + (t == null ? '—' : n(t, t < 10 ? 1 : 0) + ' t') + '</b><small>CO2e a year</small></div><div><span>Saves</span><b>' + inr(r.est.savings) + '</b><small>a year</small></div><div><span>Costs</span><b>' + inr(r.est.cost) + '</b><small>' + (r.own ? 'your figure' : 'typical estimate') + '</small></div><div><span>Pays back</span><b>' + (m == null ? '—' : payLong(m)) + '</b><small>&nbsp;</small></div></div>' +
       '<div class="dr-sec"><h4>Why</h4><p>' + esc(r.problem) + '</p></div><div class="dr-sec"><h4>What to do</h4><p>' + esc(r.def.intervention) + '</p></div>' +
-      '<div class="dr-sec"><h4>How the numbers are worked out</h4><p class="small">General rule of thumb: such measures typically cut about ' + Math.round(r.pct * 100) + '% of this source. Yearly saving = ' + Math.round(r.pct * 100) + '% of its yearly cost from your records. ' + (r.own ? 'Cost is the figure you entered.' : 'Cost assumes a typical ' + r.pay + '-month payback; enter your own quote below.') + ' These are estimates, not measured results.</p></div>' +
+      '<div class="dr-sec"><h4>How the numbers are worked out</h4><p class="small">' + (r.basis ? 'Based on ' + esc(r.basis) + '. ' : '') + (r.key === 'solar' ? 'The panels are sized to make about ' + Math.round(r.pct * 100) + '% of the site\'s grid electricity; yearly saving = that share of the electricity bill. ' + (r.own ? 'Cost is the figure you entered.' : 'Cost uses a typical installed price; enter your own quote below.') : 'Rule of thumb for this kind of measure: it cuts about ' + Math.round(r.pct * 100) + '% of this source. Yearly saving = ' + Math.round(r.pct * 100) + '% of its yearly cost from your records. ' + (r.own ? 'Cost is the figure you entered.' : 'Cost assumes a typical ' + r.pay + '-month payback for this measure; enter your own quote below.')) + ' These are estimates, not measured results.</p></div>' +
       '<div class="dr-sec"><h4>Your cost or quote (₹)</h4><div class="row"><input type="number" id="gen-cost" min="0" step="1000" value="' + (r.est.cost != null ? Math.round(r.est.cost) : '') + '" style="max-width:180px"/><button type="button" class="btn sm primary" data-act="pl-gencost" data-arg="' + esc(id) + '">Save cost</button>' + (r.own ? '<button type="button" class="btn sm ghost" data-act="pl-gencost-reset" data-arg="' + esc(id) + '">Use typical</button>' : '') + '</div></div>' +
       '<div class="row" style="border-top:1px solid var(--line-2);padding-top:12px">' + (nxt ? '<button type="button" class="btn sm primary" data-act="pl-genstatus" data-arg="' + esc(id) + '|' + nxt + '">' + (nxt === 'In progress' ? 'Start this action' : 'Mark as done') + '</button>' : '') + (r.status !== 'Suggested' ? '<button type="button" class="btn sm ghost" data-act="pl-genstatus" data-arg="' + esc(id) + '|Suggested">Reset</button>' : '') + '<button type="button" class="btn sm" data-chart-click="twin:' + esc(r.area) + '">Open in twin</button></div>';
   }
   // ---- 2. every area ranked, problem spots numbered ----
   function spotList(vm) {
     const by = {};
-    vm.recs.filter(OPEN).forEach((r) => { const s = by[r.area] = by[r.area] || { area: r.area, recs: [], save: 0, kg: 0 }; s.recs.push(r); s.save += (r.est && r.est.savings) || 0; s.kg += (r.est && r.est.kg) || 0; });
+    vm.recs.filter((r) => OPEN(r) && r.area !== 'site').forEach((r) => { const s = by[r.area] = by[r.area] || { area: r.area, recs: [], save: 0, kg: 0 }; s.recs.push(r); s.save += (r.est && r.est.savings) || 0; s.kg += (r.est && r.est.kg) || 0; });
     const ba = vm.agg.byArea;
     return Object.values(by).sort((x, y) => (y.save + y.kg * 5) - (x.save + x.kg * 5)).slice(0, 3).sort((x, y) => (ba[y.area] || 0) - (ba[x.area] || 0));
   }
@@ -236,6 +413,9 @@
     const st = A.S.settings, tgt = st.target || {}; if (!tgt.pct) return '';
     const bA = E.aggregate(vm.f.records, fy.months, st), nA = E.aggregate(vm.f.records, ltm.months, st);
     const b12 = bA.s1 + bA.s2, l12 = nA.s1 + nA.s2; if (!(b12 > 0) || !(l12 > 0)) return '';
+    const covered = (ms) => ms.filter((m) => vm.f.records.some((r) => r.month === m && r.calc && r.calc.kg > 0)).length;
+    if (covered(fy.months) < fy.months.length) return '<section class="ovc ov-span pl-tgt"><div class="pl-tgt-h"><span class="pl-tgt-k">' + ic('flag') + 'Target</span><b>−' + tgt.pct + '% by ' + esc(tgt.targetFY || '') + '</b><small>factory emissions (Scope 1 + 2) vs ' + esc(tgt.baseFY || 'baseline') + '</small></div>' +
+      '<p class="pl-tgt-p">The baseline year ' + esc(tgt.baseFY || '') + ' has data for only ' + covered(fy.months) + ' of its ' + fy.months.length + ' months, so progress against the target is not shown yet. Add the missing months (or pick a later baseline year in Settings) to track it.</p></section>';
     const goal = b12 * (1 - tgt.pct / 100);
     const cut = vm.recs.filter((r) => picked.has(r.id) && [1, 2].includes(E.recordScope({ category: r.category || (r.def && r.def.category) }))).reduce((t, r) => t + Math.max(0, (tOf(r) || 0) * 1000), 0);
     const after = l12 - cut;

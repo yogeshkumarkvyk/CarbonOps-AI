@@ -276,33 +276,80 @@
   };
   ACT['bsim-reset'] = () => { UI.bsim = {}; render(); };
 
-  // ---------- Sample data for whatever rooms the plan has (two months, clearly marked as simulated) ----------
+  // ---------- Sample data for whatever rooms the plan has (12 months, clearly marked as simulated) ----------
+  // Each room gets a pattern that fits what it is, so the planner has something real to diagnose:
+  // a process hall whose energy per unit creeps up, a compressor that runs flat out regardless of output,
+  // a cold room that peaks in summer, a generator that spikes in the monsoon, and so on.
   // Typical monthly electricity use per square metre by room type (rough planning figures for a demo, not benchmarks).
   const KWH_M2 = { 'Cold room': 42, Process: 28, Laboratory: 24, Utility: 36, Storage: 7, Logistics: 6, Support: 11, Area: 14, Site: 0 };
   const PLAN_M2 = 6000;
+  // Month-of-year shapes (index 0 = January) for a factory in India.
+  const COOL = [0.78, 0.82, 0.95, 1.15, 1.3, 1.2, 1.02, 0.98, 1.0, 0.97, 0.88, 0.8];      // cooling load: summer peak
+  const PROD = [1.0, 1.03, 1.12, 0.94, 0.97, 1.0, 1.02, 1.04, 1.06, 0.9, 0.88, 0.98];     // output: March year-end push, Diwali dip
+  const MONSOON = [0.7, 0.65, 0.75, 0.9, 1.0, 1.9, 2.7, 2.4, 1.7, 1.0, 0.8, 0.75];       // generator: grid outages in the rains
+  const HEAT = [1.06, 1.04, 1.0, 0.97, 0.96, 0.97, 0.98, 0.98, 0.98, 0.99, 1.02, 1.05];   // process heat: more fuel in cold months
   function hash(str) { let h = 2166136261; for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); } return h >>> 0; }
+  function sampleMonths() { const now = new Date(); const out = []; for (let i = 11; i >= 0; i--) { const d = new Date(Date.UTC(now.getFullYear(), now.getMonth() - i, 1)); out.push(d.toISOString().slice(0, 7)); } return out; }
+  function profileOf(a, nm, used) {
+    if (/compress|air plant/.test(nm)) return 'compressor';
+    if (/generator|\bdg\b|genset|power house/.test(nm)) return 'generator';
+    if (/boiler|furnace|heat|oven|kiln|steam|thermic/.test(nm)) return 'boiler';
+    if (/waste|scrap|effluent|etp/.test(nm)) return 'waste';
+    if (/transport|logistic|dispatch|fleet|truck|despatch|shipping/.test(nm) || a.kind === 'Logistics') return 'logistics';
+    if (a.kind === 'Cold room' || /cool|chill|refrig|cold/.test(nm)) return 'cold';
+    if (/canteen|kitchen|cafeteria|pantry/.test(nm)) return 'canteen';
+    if (a.kind === 'Support') return 'office';
+    if (a.kind === 'Laboratory') return 'lab';
+    if (a.kind === 'Storage') return used.storage++ === 0 ? 'warehouse' : 'yard-store';
+    if (a.kind === 'Process') return used.process++ === 0 ? 'process-drift' : 'process-steady';
+    if (a.kind === 'Utility') return 'utility';
+    return 'general';
+  }
   function sampleRows() {
     const f = F(); const bp = f.blueprint; const zones = (bp && bp.zones) || [];
-    const now = nowMonth(); const d = new Date(now + '-01T00:00:00Z'); d.setUTCMonth(d.getUTCMonth() - 1); const prev = d.toISOString().slice(0, 7);
+    const months = sampleMonths();
     const sizes = {}; zones.forEach((z) => { sizes[z.area] = (sizes[z.area] || 0) + z.w * z.h; });
     const tot = Object.values(sizes).reduce((t, v) => t + v, 0) || 1;
-    const rows = []; let i = 0;
-    const add = (area, cat, base, unit, price, src) => {
-      const swing = [0.14, -0.09, 0.07, -0.12, 0.11, -0.05, 0.18, -0.15][(hash(area + cat) + i++) % 8];
-      rows.push({ area, cat, month: prev, qty: Math.round(base), unit, cost: Math.round(base * price), src });
-      rows.push({ area, cat, month: now, qty: Math.round(base * (1 + swing)), unit, cost: Math.round(base * (1 + swing) * price), src });
-    };
+    const rows = []; const used = { storage: 0, process: 0 }; let haveDG = false;
+    // One row per month; shape(i, mo) gives the multiplier for month i (0 = oldest, 11 = latest) and calendar month mo (0-11).
+    const series = (area, cat, base, unit, price, shape) => months.forEach((month, i) => {
+      const mo = Number(month.slice(5, 7)) - 1;
+      const noise = 1 + ((hash(area + cat + month) % 1000) / 1000 - 0.5) * 0.06;
+      const q = base * shape(i, mo) * noise; if (!(q > 0)) return;
+      const dp = unit === 't' ? 2 : 0;
+      rows.push({ area, cat, month, qty: Number(q.toFixed(dp)), unit, cost: Math.round(q * price) });
+    });
     D.AREAS.filter((a) => a.fromPlan && sizes[a.id]).forEach((a) => {
       const m2 = (sizes[a.id] / tot) * PLAN_M2; const nm = a.name.toLowerCase();
-      const kwh = m2 * (KWH_M2[a.kind] != null ? KWH_M2[a.kind] : 14);
-      if (kwh > 0) add(a.id, 'electricity', Math.max(800, kwh), 'kWh', 8.5);
-      if (/boiler|kitchen|cook|fry|bak|oven|steam|retort|heat/.test(nm)) add(a.id, 'lpg', 900 + m2 * 1.6, 'kg', 78);
-      if (/generator|\bdg\b|genset|power house/.test(nm)) add(a.id, 'diesel', 500 + m2 * 1.2, 'L', 92);
-      if (a.kind === 'Logistics') add(a.id, 'diesel', 180 + m2 * 0.15, 'L', 92);
-      if (a.kind === 'Cold room' && m2 > PLAN_M2 * 0.08) rows.push({ area: a.id, cat: 'refrigerant', month: now, qty: Math.round(2 + m2 / 400), unit: 'kg', cost: 0 });
+      const kwh = Math.max(900, m2 * (KWH_M2[a.kind] != null ? KWH_M2[a.kind] : 14));
+      const p = profileOf(a, nm, used);
+      const el = (k, shape) => series(a.id, 'electricity', kwh * k, 'kWh', 8.5, shape);
+      if (p === 'process-drift') {           // energy per unit creeps up over the last six months (idle running)
+        el(1, (i, mo) => PROD[mo] * (1 + Math.max(0, i - 5) * 0.025));
+        series(a.id, 'steel', 4 + m2 / 900, 't', 62000, (i, mo) => PROD[mo] * (i > 7 ? 1.06 : 1));
+      } else if (p === 'process-steady') el(1, (i, mo) => 0.25 + 0.75 * PROD[mo]);   // follows output closely
+      else if (p === 'compressor') el(1.15, (i, mo) => 0.93 + 0.07 * PROD[mo]);      // runs almost flat out all the time
+      else if (p === 'cold') {
+        el(1, (i, mo) => Math.pow(COOL[mo], 1.6));
+        months.forEach((month, i) => { const mo = Number(month.slice(5, 7)) - 1; if (mo === 4 || mo === 8) rows.push({ area: a.id, cat: 'refrigerant', month, qty: mo === 4 ? 3 : 4, unit: 'kg', cost: (mo === 4 ? 3 : 4) * 1100 }); });
+      } else if (p === 'boiler') {           // LPG per unit made slowly rises (burners drifting out of tune)
+        el(0.45, (i, mo) => PROD[mo]);
+        series(a.id, 'lpg', 900 + m2 * 1.6, 'kg', 78, (i, mo) => PROD[mo] * HEAT[mo] * (1 + Math.max(0, i - 5) * 0.035));
+      } else if (p === 'generator') { haveDG = true; el(0.12, () => 1); series(a.id, 'diesel', 450 + m2 * 1.1, 'L', 92, (i, mo) => MONSOON[mo]); }
+      else if (p === 'logistics') {
+        el(0.6, () => 1);
+        series(a.id, 'diesel', 380 + m2 * 0.25, 'L', 92, (i, mo) => PROD[mo] * (1 + i * 0.01));
+        series(a.id, 'freight_road', 52000 + m2 * 30, 'tkm', 3.2, (i, mo) => PROD[mo]);
+      } else if (p === 'waste') { el(0.4, () => 1); series(a.id, 'waste_landfill', 5 + m2 / 400, 't', 2500, (i, mo) => PROD[mo]); }
+      else if (p === 'warehouse') el(1, () => 1);                                   // lighting: flat whatever the season
+      else if (p === 'yard-store') { el(0.8, () => 1); series(a.id, 'diesel', 160 + m2 * 0.12, 'L', 92, (i, mo) => PROD[mo]); }   // diesel forklifts
+      else if (p === 'office') el(1, (i, mo) => 0.55 + 0.45 * Math.pow(COOL[mo], 2));
+      else if (p === 'canteen') { el(0.8, (i, mo) => 0.6 + 0.4 * COOL[mo]); series(a.id, 'lpg', 220 + m2 * 0.4, 'kg', 78, () => 1); }
+      else if (p === 'lab') el(1, (i, mo) => 0.88 + 0.12 * PROD[mo]);
+      else el(1, (i, mo) => 0.5 + 0.5 * PROD[mo]);
     });
-    add('site', 'diesel', 420, 'L', 92);
-    add('site', 'production', 160000, 'units', 0);
+    if (!haveDG) series('site', 'diesel', 420, 'L', 92, (i, mo) => MONSOON[mo]);
+    series('site', 'production', 160000, 'units', 0, (i, mo) => PROD[mo]);
     return rows;
   }
   ACT['sample-fill'] = () => {
@@ -316,9 +363,10 @@
       if (r.cat === 'production') rec.unit = 'units';
       rec.calc = E.calcRecord(rec, S().reg); F().records.push(rec); added++;
     });
-    audit('Sample data added', added + ' simulated records for ' + D.AREAS.filter((a) => a.fromPlan).length + ' rooms (2 months)');
+    const ms = [...new Set(rows.map((r) => r.month))].sort();
+    audit('Sample data added', added + ' simulated records for ' + D.AREAS.filter((a) => a.fromPlan).length + ' rooms (' + ms.length + ' months)');
     save(); render();
-    toast(added ? 'Added ' + added + ' sample records for ' + D.monthLabel(rows[0].month, true) + ' and ' + D.monthLabel(rows[1].month, true) + (skipped ? ' (' + skipped + ' already there)' : '') + '. They are marked Simulated.' : 'Sample data is already there.');
+    toast(added ? 'Added ' + added + ' sample records covering ' + D.monthLabel(ms[0], true) + ' to ' + D.monthLabel(ms[ms.length - 1], true) + (skipped ? ' (' + skipped + ' already there)' : '') + '. They are marked Simulated.' : 'Sample data is already there.');
   };
   ACT['sample-clear'] = () => {
     const before = F().records.length; F().records = F().records.filter((r) => r.origin !== 'sample');
@@ -327,7 +375,7 @@
   const hasSample = () => F().records.some((r) => r.origin === 'sample');
   A.sampleButtons = (small) => hasSample()
     ? '<button type="button" class="btn ' + (small ? 'sm ' : '') + 'ghost" data-act="sample-clear">' + ic('eraser') + 'Remove sample data</button>'
-    : '<button type="button" class="btn ' + (small ? 'sm ' : '') + 'sample-btn" data-act="sample-fill" title="Two months of simulated data for every room on your plan">' + ic('sparkles') + 'Add sample data (2 months)</button>';
+    : '<button type="button" class="btn ' + (small ? 'sm ' : '') + 'sample-btn" data-act="sample-fill" title="A year of simulated data for every room on your plan">' + ic('sparkles') + 'Add sample data (12 months)</button>';
 
   // ---------- Settings: start fresh / load the sample factory ----------
   ACT['ws-fresh'] = () => {
